@@ -793,12 +793,12 @@
   margin-left: auto;
 }
 
-.sidebar-version__status.sidebar-connection-status--online {
+.sidebar-version__status--enabled {
   background: var(--ok);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 14%, transparent);
 }
 
-.sidebar-version__status.sidebar-connection-status--offline {
+.sidebar-version__status--disabled {
   background: var(--danger);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 14%, transparent);
 }

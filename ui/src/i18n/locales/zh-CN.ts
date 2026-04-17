@@ -146,7 +146,7 @@ export const zh_CN: TranslationMap = {
     resize: "调整侧边栏大小",
   },
   tabs: {
-    gdufe: "GDUFE Console",
+    gdufe: "GDUFE控制台",
     agents: "代理",
     overview: "概览",
     channels: "频道",

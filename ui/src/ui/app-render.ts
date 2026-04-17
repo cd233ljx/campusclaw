@@ -14,7 +14,6 @@ import {
   renderChatSessionSelect,
   renderTab,
   resolveAssistantAttachmentAuthToken,
-  renderSidebarConnectionStatus,
   renderTopbarThemeModeToggle,
   switchChatSession,
 } from "./app-render.helpers.ts";
@@ -114,7 +113,6 @@ import {
   updateSkillEdit,
   updateSkillEnabled,
 } from "./controllers/skills.ts";
-import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "./external-link.ts";
 import "./components/dashboard-header.ts";
 import { icons } from "./icons.ts";
 import { TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
@@ -421,8 +419,15 @@ export function renderApp(state: AppViewState) {
   const chatFocus = isChat && (state.settings.chatFocusMode || state.onboarding);
   const navDrawerOpen = state.navDrawerOpen && !chatFocus && !state.onboarding;
   const navCollapsed = state.settings.navCollapsed && !navDrawerOpen;
+  const showAdvancedNav = Boolean(state.settings.showAdvancedNav);
   const showThinking = state.onboarding ? false : state.settings.chatShowThinking;
   const showToolCalls = state.onboarding ? true : state.settings.chatShowToolCalls;
+  const visibleTabGroups = showAdvancedNav
+    ? TAB_GROUPS
+    : TAB_GROUPS.filter((group) => group.label === "chat").map((group) => ({
+        ...group,
+        tabs: group.tabs.filter((tab) => tab === "gdufe" || tab === "chat"),
+      }));
   const assistantAvatarUrl = resolveAssistantAvatarUrl(state);
   const chatAvatarUrl = state.chatAvatarUrl ?? assistantAvatarUrl ?? null;
   const configValue =
@@ -938,7 +943,7 @@ export function renderApp(state: AppViewState) {
             </div>
             <div class="sidebar-shell__body">
               <nav class="sidebar-nav">
-                ${TAB_GROUPS.map((group) => {
+                ${visibleTabGroups.map((group) => {
                   const isGroupCollapsed = state.settings.navGroupsCollapsed[group.label] ?? false;
                   const hasActiveTab = group.tabs.some((tab) => tab === state.tab);
                   const showItems = navCollapsed || hasActiveTab || !isGroupCollapsed;
@@ -978,38 +983,46 @@ export function renderApp(state: AppViewState) {
             </div>
             <div class="sidebar-shell__footer">
               <div class="sidebar-utility-group">
-                <a
-                  class="nav-item nav-item--external sidebar-utility-link"
-                  href="https://docs.openclaw.ai"
-                  target=${EXTERNAL_LINK_TARGET}
-                  rel=${buildExternalLinkRel()}
-                  title="${t("common.docs")} (opens in new tab)"
+                <div class="sidebar-mode-switch">${renderTopbarThemeModeToggle(state)}</div>
+                <button
+                  type="button"
+                  class="sidebar-version sidebar-version--toggle"
+                  @click=${() => {
+                    const nextShowAdvanced = !showAdvancedNav;
+                    state.applySettings({
+                      ...state.settings,
+                      showAdvancedNav: nextShowAdvanced,
+                    });
+                    if (!nextShowAdvanced && state.tab !== "gdufe" && state.tab !== "chat") {
+                      state.setTab("gdufe");
+                    }
+                  }}
+                  title=${showAdvancedNav ? t("common.hideAdvanced") : t("common.showAdvanced")}
+                  aria-pressed=${showAdvancedNav}
                 >
-                  <span class="nav-item__icon" aria-hidden="true">${icons.book}</span>
                   ${!navCollapsed
                     ? html`
-                        <span class="nav-item__text">${t("common.docs")}</span>
-                        <span class="nav-item__external-icon">${icons.externalLink}</span>
+                        <span class="sidebar-version__label">高级设置</span>
+                        <span class="sidebar-version__text"
+                          >${showAdvancedNav
+                            ? t("common.hideAdvanced")
+                            : t("common.showAdvanced")}</span
+                        >
                       `
                     : nothing}
-                </a>
-                <div class="sidebar-mode-switch">${renderTopbarThemeModeToggle(state)}</div>
-                ${(() => {
-                  const version = state.hello?.server?.version ?? "";
-                  return version
-                    ? html`
-                        <div class="sidebar-version" title=${`v${version}`}>
-                          ${!navCollapsed
-                            ? html`
-                                <span class="sidebar-version__label">${t("common.version")}</span>
-                                <span class="sidebar-version__text">v${version}</span>
-                                ${renderSidebarConnectionStatus(state)}
-                              `
-                            : html` ${renderSidebarConnectionStatus(state)} `}
-                        </div>
-                      `
-                    : nothing;
-                })()}
+                  <span
+                    class="sidebar-version__status ${showAdvancedNav
+                      ? "sidebar-version__status--enabled"
+                      : "sidebar-version__status--disabled"}"
+                    role="img"
+                    aria-label=${showAdvancedNav
+                      ? "Advanced settings enabled"
+                      : "Advanced settings disabled"}
+                    title=${showAdvancedNav
+                      ? "Advanced settings enabled"
+                      : "Advanced settings disabled"}
+                  ></span>
+                </button>
               </div>
             </div>
           </div>
