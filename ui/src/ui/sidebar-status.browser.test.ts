@@ -4,21 +4,14 @@ import { mountApp, registerAppMountHooks } from "./test-helpers/app-mount.ts";
 registerAppMountHooks();
 
 describe("sidebar connection status", () => {
-  it("shows a single online status dot next to the version", async () => {
+  it("shows advanced-settings toggle with a disabled status dot by default", async () => {
     const app = mountApp("/chat");
     await app.updateComplete;
 
-    app.hello = {
-      ok: true,
-      server: { version: "1.2.3" },
-    } as never;
-    app.requestUpdate();
-    await app.updateComplete;
-
-    const version = app.querySelector<HTMLElement>(".sidebar-version");
+    const version = app.querySelector<HTMLElement>(".sidebar-version--toggle");
     const statusDot = app.querySelector<HTMLElement>(".sidebar-version__status");
     expect(version).not.toBeNull();
     expect(statusDot).not.toBeNull();
-    expect(statusDot?.getAttribute("aria-label")).toContain("Online");
+    expect(statusDot?.classList.contains("sidebar-version__status--disabled")).toBe(true);
   });
 });

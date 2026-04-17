@@ -56,6 +56,7 @@ export type UiSettings = {
   navCollapsed: boolean; // Collapsible sidebar state
   navWidth: number; // Sidebar width when expanded (240–400px)
   navGroupsCollapsed: Record<string, boolean>; // Which nav groups are collapsed
+  showAdvancedNav?: boolean; // Whether to show advanced navigation groups
   borderRadius: number; // Corner roundness (0–100, default 50)
   locale?: string;
 };
@@ -194,6 +195,7 @@ export function loadSettings(): UiSettings {
     navCollapsed: false,
     navWidth: 220,
     navGroupsCollapsed: {},
+    showAdvancedNav: false,
     borderRadius: 50,
     locale: "zh-CN",
   };
@@ -250,6 +252,10 @@ export function loadSettings(): UiSettings {
         typeof parsed.navGroupsCollapsed === "object" && parsed.navGroupsCollapsed !== null
           ? parsed.navGroupsCollapsed
           : defaults.navGroupsCollapsed,
+      showAdvancedNav:
+        typeof parsed.showAdvancedNav === "boolean"
+          ? parsed.showAdvancedNav
+          : defaults.showAdvancedNav,
       borderRadius:
         typeof parsed.borderRadius === "number" &&
         parsed.borderRadius >= 0 &&
@@ -315,6 +321,7 @@ function persistSettings(next: UiSettings) {
     navCollapsed: next.navCollapsed,
     navWidth: next.navWidth,
     navGroupsCollapsed: next.navGroupsCollapsed,
+    showAdvancedNav: next.showAdvancedNav ?? false,
     borderRadius: next.borderRadius,
     sessionsByGateway,
     ...(next.locale ? { locale: next.locale } : {}),
