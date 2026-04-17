@@ -2,20 +2,19 @@ import { html } from "lit";
 import { t } from "../../i18n/index.ts";
 import type { AppViewState } from "../app-view-state.ts";
 import { icons } from "../icons.ts";
-import { normalizeBasePath } from "../navigation.ts";
-import { agentLogoUrl } from "./agents-utils.ts";
 import { renderConnectCommand } from "./connect-command.ts";
 
-export function renderLoginGate(state: AppViewState) {
-  const basePath = normalizeBasePath(state.basePath ?? "");
-  const faviconSrc = agentLogoUrl(basePath);
+const GDUFE_LOGO_URL = "/assets/gdufe_logo.png";
 
+export function renderLoginGate(state: AppViewState) {
   return html`
     <div class="login-gate">
       <div class="login-gate__card">
         <div class="login-gate__header">
-          <img class="login-gate__logo" src=${faviconSrc} alt="OpenClaw" />
-          <div class="login-gate__title">OpenClaw</div>
+          <div class="login-gate__logos">
+            <img class="login-gate__gdufe-logo" src=${GDUFE_LOGO_URL} alt="GDUFE logo" />
+          </div>
+          <div class="login-gate__title">OpenClaw for GDUFE</div>
           <div class="login-gate__sub">${t("login.subtitle")}</div>
         </div>
         <div class="login-gate__form">
