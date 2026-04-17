@@ -117,9 +117,8 @@ import {
 import { buildExternalLinkRel, EXTERNAL_LINK_TARGET } from "./external-link.ts";
 import "./components/dashboard-header.ts";
 import { icons } from "./icons.ts";
-import { normalizeBasePath, TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
+import { TAB_GROUPS, subtitleForTab, titleForTab } from "./navigation.ts";
 import { isPluginEnabledInConfigSnapshot } from "./plugin-activation.ts";
-import { agentLogoUrl } from "./views/agents-utils.ts";
 import {
   resolveAgentConfig,
   resolveConfiguredCronModelSuggestions,
@@ -200,6 +199,7 @@ function lazyRender<M>(getter: () => M | null, render: (mod: M) => unknown) {
 }
 
 const UPDATE_BANNER_DISMISS_KEY = "openclaw:control-ui:update-banner-dismissed:v1";
+const GDUFE_LOGO_URL = "/assets/gdufe_logo.png";
 const CRON_THINKING_SUGGESTIONS = ["off", "minimal", "low", "medium", "high"];
 const CRON_TIMEZONE_SUGGESTIONS = [
   "UTC",
@@ -498,7 +498,6 @@ export function renderApp(state: AppViewState) {
       await loadDreamingStatus(state);
     })();
   };
-  const basePath = normalizeBasePath(state.basePath ?? "");
   const resolveSelectedAgentId = () =>
     state.agentsSelectedId ??
     state.agentsList?.defaultId ??
@@ -908,14 +907,16 @@ export function renderApp(state: AppViewState) {
                 ${navCollapsed
                   ? nothing
                   : html`
-                      <img
-                        class="sidebar-brand__logo"
-                        src="${agentLogoUrl(basePath)}"
-                        alt="OpenClaw"
-                      />
+                      <div class="sidebar-brand__logos">
+                        <img
+                          class="sidebar-brand__gdufe-logo"
+                          src="${GDUFE_LOGO_URL}"
+                          alt="GDUFE logo"
+                        />
+                      </div>
                       <span class="sidebar-brand__copy">
                         <span class="sidebar-brand__eyebrow">${t("nav.control")}</span>
-                        <span class="sidebar-brand__title">OpenClaw</span>
+                        <span class="sidebar-brand__title">GDUFE Claw</span>
                       </span>
                     `}
               </div>
