@@ -84,6 +84,75 @@ function createCatalogFingerprint(servers: Record<string, unknown>): string {
   return crypto.createHash("sha1").update(JSON.stringify(servers)).digest("hex");
 }
 
+function resolveFeishuSessionIdentity(sessionKey: string | undefined): {
+  openId: string;
+  tenantKey: string;
+} | null {
+  const normalized = normalizeOptionalString(sessionKey);
+  if (!normalized) {
+    return null;
+  }
+
+  const parts = normalized
+    .split(":")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const channelIndex = parts.indexOf("feishu");
+  if (channelIndex < 0) {
+    return null;
+  }
+
+  const tail = parts.slice(channelIndex + 1);
+  if (tail.length < 2) {
+    return null;
+  }
+
+  let tenantKey = "default";
+  let openId: string | undefined;
+
+  if (tail[0] === "direct") {
+    openId = tail[1];
+  } else if (tail.length >= 3 && tail[1] === "direct") {
+    tenantKey = tail[0] || "default";
+    openId = tail[2];
+  }
+
+  const normalizedOpenId = normalizeOptionalString(openId);
+  if (!normalizedOpenId) {
+    return null;
+  }
+
+  return {
+    openId: normalizedOpenId,
+    tenantKey,
+  };
+}
+
+function applySessionScopedMcpHeaders(params: {
+  rawServer: unknown;
+  sessionKey?: string;
+}): unknown {
+  const identity = resolveFeishuSessionIdentity(params.sessionKey);
+  if (!identity || !isMcpConfigRecord(params.rawServer)) {
+    return params.rawServer;
+  }
+
+  const existingHeaders = isMcpConfigRecord(params.rawServer.headers)
+    ? params.rawServer.headers
+    : {};
+
+  return {
+    ...params.rawServer,
+    headers: {
+      ...existingHeaders,
+      "X-Feishu-Open-ID": identity.openId,
+      "X-Feishu-User-ID": identity.openId,
+      "X-Channel": "feishu",
+      "X-Tenant-Key": identity.tenantKey,
+    },
+  };
+}
+
 function loadSessionMcpConfig(params: {
   workspaceDir: string;
   cfg?: OpenClawConfig;
@@ -159,7 +228,10 @@ export function createSessionMcpRuntime(params: {
       try {
         for (const [serverName, rawServer] of Object.entries(loaded.mcpServers)) {
           failIfDisposed();
-          const resolved = resolveMcpTransport(serverName, rawServer);
+          const resolved = resolveMcpTransport(
+            serverName,
+            applySessionScopedMcpHeaders({ rawServer, sessionKey: params.sessionKey }),
+          );
           if (!resolved) {
             continue;
           }

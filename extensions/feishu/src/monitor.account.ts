@@ -265,52 +265,201 @@ function parseFeishuBotMenuEvent(value: unknown): FeishuBotMenuEvent | null {
   };
 }
 
+function parseLooseRecord(value: unknown): Record<string, unknown> | null {
+  if (isRecord(value)) {
+    return value;
+  }
+  if (Array.isArray(value) && value.length === 1 && isRecord(value[0])) {
+    return value[0];
+  }
+
+  let current: unknown = value;
+  for (let depth = 0; depth < 2; depth += 1) {
+    if (typeof current !== "string") {
+      break;
+    }
+    const text = current.trim();
+    if (!text) {
+      return null;
+    }
+    try {
+      current = JSON.parse(text);
+    } catch {
+      return null;
+    }
+
+    if (isRecord(current)) {
+      return current;
+    }
+    if (Array.isArray(current) && current.length === 1 && isRecord(current[0])) {
+      return current[0];
+    }
+  }
+
+  return null;
+}
+
+function pickCardActionRoot(value: Record<string, unknown>): Record<string, unknown> {
+  const candidates: Record<string, unknown>[] = [];
+  const seen = new Set<Record<string, unknown>>();
+
+  const pushCandidate = (candidate: unknown): void => {
+    if (!isRecord(candidate)) {
+      return;
+    }
+    if (seen.has(candidate)) {
+      return;
+    }
+    seen.add(candidate);
+    candidates.push(candidate);
+  };
+
+  pushCandidate(value);
+  pushCandidate(value.event);
+  pushCandidate(value.data);
+
+  const eventNode = parseLooseRecord(value.event);
+  const dataNode = parseLooseRecord(value.data);
+  pushCandidate(eventNode);
+  pushCandidate(dataNode);
+  pushCandidate(eventNode?.event);
+  pushCandidate(eventNode?.data);
+  pushCandidate(dataNode?.event);
+
+  for (const candidate of candidates) {
+    const hasAction = Boolean(parseLooseRecord(candidate.action));
+    const hasOperator = Boolean(
+      parseLooseRecord(candidate.operator) ?? parseLooseRecord(candidate.operator_id),
+    );
+    if (hasAction && hasOperator) {
+      return candidate;
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (parseLooseRecord(candidate.action)) {
+      return candidate;
+    }
+  }
+
+  return value;
+}
+
+function summarizeMalformedFeishuCardActionPayload(value: unknown): string {
+  if (!isRecord(value)) {
+    return JSON.stringify({
+      payloadType: typeof value,
+    });
+  }
+
+  const root = pickCardActionRoot(value);
+  const operator = parseLooseRecord(root.operator) ?? parseLooseRecord(root.operator_id);
+  const action = parseLooseRecord(root.action);
+  const context = parseLooseRecord(root.context);
+  const header = parseLooseRecord(value.header) ?? parseLooseRecord(root.header);
+  const rawActionValue =
+    action?.value ?? parseLooseRecord(action?.option)?.value ?? action?.action_value;
+  const parsedActionValue = parseLooseRecord(rawActionValue);
+  const parsedFormValue = parseLooseRecord(action?.form_value);
+
+  const payloadSummary = {
+    topKeys: Object.keys(value).slice(0, 20),
+    rootKeys: Object.keys(root).slice(0, 20),
+    token:
+      readString(root.token) ?? readString(value.token) ?? readString(header?.event_id) ?? null,
+    operator: {
+      openId:
+        readString(operator?.open_id) ??
+        readString(parseLooseRecord(operator?.operator_id)?.open_id) ??
+        null,
+      userId:
+        readString(operator?.user_id) ??
+        readString(parseLooseRecord(operator?.operator_id)?.user_id) ??
+        null,
+    },
+    action: {
+      tag: readString(action?.tag) ?? null,
+      name: readString(action?.name) ?? null,
+      rawValueType: Array.isArray(rawActionValue) ? "array" : typeof rawActionValue,
+      parsedValueKeys: parsedActionValue ? Object.keys(parsedActionValue).slice(0, 20) : null,
+      formValueKeys: parsedFormValue ? Object.keys(parsedFormValue).slice(0, 20) : null,
+    },
+    context: {
+      keys: context ? Object.keys(context).slice(0, 20) : null,
+      openId: readString(context?.open_id) ?? null,
+      chatId:
+        readString(context?.chat_id) ??
+        readString(context?.open_chat_id) ??
+        readString(root.open_chat_id) ??
+        null,
+    },
+  };
+
+  return JSON.stringify(payloadSummary);
+}
+
 function parseFeishuCardActionEventPayload(value: unknown): FeishuCardActionEvent | null {
   if (!isRecord(value)) {
     return null;
   }
-  const operator = value.operator;
-  const action = value.action;
-  const context = value.context;
+  const root = pickCardActionRoot(value);
+  const operator = parseLooseRecord(root.operator) ?? parseLooseRecord(root.operator_id);
+  const action = parseLooseRecord(root.action);
+  const context = parseLooseRecord(root.context) ?? {};
   if (!isRecord(operator) || !isRecord(action) || !isRecord(context)) {
     return null;
   }
-  const token = readString(value.token);
-  const openId = readString(operator.open_id);
-  const userId = readString(operator.user_id);
-  const unionId = readString(operator.union_id);
-  const tag = readString(action.tag);
-  const actionValue = action.value;
+  const header = parseLooseRecord(value.header) ?? parseLooseRecord(root.header);
+  const token =
+    readString(root.token) ??
+    readString(value.token) ??
+    readString(header?.event_id) ??
+    readString(root.open_message_id) ??
+    readString(root.message_id);
+  const nestedOperatorId = isRecord(operator.operator_id) ? operator.operator_id : null;
   const contextOpenId = readString(context.open_id);
+  const openId =
+    readString(operator.open_id) ??
+    readString(nestedOperatorId?.open_id) ??
+    contextOpenId ??
+    readString(root.open_id) ??
+    readString(value.open_id);
+  const userId = readString(operator.user_id) ?? readString(nestedOperatorId?.user_id);
+  const unionId = readString(operator.union_id) ?? readString(nestedOperatorId?.union_id);
+  const tag = readString(action.tag) ?? "button";
+  const rawActionValue =
+    action.value ?? parseLooseRecord(action.option)?.value ?? action.action_value;
+  const actionValue = parseLooseRecord(rawActionValue);
+  const actionName = readString(action.name);
+  const rawActionFormValue = action.form_value;
+  const actionFormValue = parseLooseRecord(rawActionFormValue) ?? undefined;
   const contextUserId = readString(context.user_id);
-  const chatId = readString(context.chat_id);
-  if (
-    !token ||
-    !openId ||
-    !userId ||
-    !unionId ||
-    !tag ||
-    !isRecord(actionValue) ||
-    !contextOpenId ||
-    !contextUserId ||
-    !chatId
-  ) {
+  const contextOpenChatId = readString(context.open_chat_id);
+  const chatId =
+    readString(context.chat_id) ??
+    contextOpenChatId ??
+    readString(root.open_chat_id) ??
+    contextOpenId ??
+    openId;
+  if (!token || !openId || !tag || (!actionValue && !isRecord(actionFormValue)) || !chatId) {
     return null;
   }
   return {
     operator: {
       open_id: openId,
-      user_id: userId,
-      union_id: unionId,
+      user_id: userId ?? "",
+      union_id: unionId ?? "",
     },
     token,
     action: {
-      value: actionValue,
+      value: actionValue ?? {},
       tag,
+      ...(actionName ? { name: actionName } : {}),
+      ...(isRecord(actionFormValue) ? { form_value: actionFormValue } : {}),
     },
     context: {
-      open_id: contextOpenId,
-      user_id: contextUserId,
+      open_id: contextOpenId ?? "",
+      user_id: contextUserId ?? "",
       chat_id: chatId,
     },
   };
@@ -832,7 +981,9 @@ function registerEventHandlers(
       try {
         const event = parseFeishuCardActionEventPayload(data);
         if (!event) {
-          error(`feishu[${accountId}]: ignoring malformed card action payload`);
+          error(
+            `feishu[${accountId}]: ignoring malformed card action payload summary=${summarizeMalformedFeishuCardActionPayload(data)}`,
+          );
           return;
         }
         const promise = handleFeishuCardAction({

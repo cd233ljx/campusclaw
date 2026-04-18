@@ -8,7 +8,18 @@ import {
   FEISHU_APPROVAL_CONFIRM_ACTION,
   FEISHU_APPROVAL_REQUEST_ACTION,
 } from "./card-ux-approval.js";
+import {
+  FEISHU_JWXT_LOGIN_SUBMIT_BUTTON_NAME,
+  FEISHU_JWXT_LOGIN_SUBMIT_ACTION,
+  handleFeishuJwxtLoginSubmit,
+  resolveFeishuJwxtLoginSubmitMetadataFallback,
+} from "./jwxt-login-flow.js";
 import { sendCardFeishu, sendMessageFeishu } from "./send.js";
+
+const FEISHU_CHAT_ID_PREFIX = "oc_";
+const FEISHU_OPEN_ID_PREFIX = "ou_";
+const FEISHU_CALLBACK_TARGET_PREFIX = /^(chat|group|channel|user|dm|open_id|p2p):/i;
+const FEISHU_INVALID_RECEIVE_ID_CODE = 230001;
 
 export type FeishuCardActionEvent = {
   operator: {
@@ -20,6 +31,8 @@ export type FeishuCardActionEvent = {
   action: {
     value: Record<string, unknown>;
     tag: string;
+    name?: string;
+    form_value?: Record<string, unknown>;
   };
   context: {
     open_id: string;
@@ -124,12 +137,80 @@ function buildSyntheticMessageEvent(
   };
 }
 
+function normalizeCallbackIdentifier(value: string | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return "";
+  }
+  return trimmed.replace(FEISHU_CALLBACK_TARGET_PREFIX, "").trim();
+}
+
 function resolveCallbackTarget(event: FeishuCardActionEvent): string {
+  const candidates = [event.context.chat_id, event.context.open_id, event.operator.open_id];
+  for (const candidate of candidates) {
+    const normalized = normalizeCallbackIdentifier(candidate);
+    if (!normalized) {
+      continue;
+    }
+    if (normalized.startsWith(FEISHU_CHAT_ID_PREFIX)) {
+      return `chat:${normalized}`;
+    }
+    if (normalized.startsWith(FEISHU_OPEN_ID_PREFIX)) {
+      return `user:${normalized}`;
+    }
+  }
   const chatId = event.context.chat_id?.trim();
   if (chatId) {
     return `chat:${chatId}`;
   }
   return `user:${event.operator.open_id}`;
+}
+
+function resolveUserCallbackTarget(event: FeishuCardActionEvent): string {
+  const candidates = [event.context.open_id, event.operator.open_id, event.context.chat_id];
+  for (const candidate of candidates) {
+    const normalized = normalizeCallbackIdentifier(candidate);
+    if (normalized.startsWith(FEISHU_OPEN_ID_PREFIX)) {
+      return `user:${normalized}`;
+    }
+  }
+  return `user:${event.operator.open_id}`;
+}
+
+function isLikelyJwxtFormSubmitAction(action: FeishuCardActionEvent["action"]): boolean {
+  const name = action.name?.trim() ?? "";
+  if (name === FEISHU_JWXT_LOGIN_SUBMIT_BUTTON_NAME) {
+    return true;
+  }
+
+  if (!action.form_value || typeof action.form_value !== "object") {
+    return false;
+  }
+
+  const keys = Object.keys(action.form_value);
+  return keys.includes("student_id") || keys.includes("password") || keys.includes("captcha_code");
+}
+
+function isInvalidReceiveIdError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) {
+    return false;
+  }
+
+  const code = (err as { code?: number }).code;
+  if (code === FEISHU_INVALID_RECEIVE_ID_CODE) {
+    return true;
+  }
+
+  const response = (err as { response?: { data?: { code?: number; msg?: string } } }).response;
+  if (response?.data?.code === FEISHU_INVALID_RECEIVE_ID_CODE) {
+    return true;
+  }
+
+  const combinedMessage =
+    `${(err as { message?: string }).message ?? ""} ${response?.data?.msg ?? ""}`
+      .toLowerCase()
+      .trim();
+  return combinedMessage.includes("invalid receive_id");
 }
 
 async function dispatchSyntheticCommand(params: {
@@ -165,12 +246,31 @@ async function sendInvalidInteractionNotice(params: {
           ? "This card action belongs to a different conversation."
           : "This card action payload is invalid.";
 
-  await sendMessageFeishu({
-    cfg: params.cfg,
-    to: resolveCallbackTarget(params.event),
-    text: `⚠️ ${reasonText}`,
-    accountId: params.accountId,
-  });
+  const primaryTarget = resolveCallbackTarget(params.event);
+  try {
+    await sendMessageFeishu({
+      cfg: params.cfg,
+      to: primaryTarget,
+      text: `⚠️ ${reasonText}`,
+      accountId: params.accountId,
+    });
+  } catch (err) {
+    if (!isInvalidReceiveIdError(err)) {
+      throw err;
+    }
+
+    const fallbackTarget = resolveUserCallbackTarget(params.event);
+    if (fallbackTarget === primaryTarget) {
+      throw err;
+    }
+
+    await sendMessageFeishu({
+      cfg: params.cfg,
+      to: fallbackTarget,
+      text: `⚠️ ${reasonText}`,
+      accountId: params.accountId,
+    });
+  }
 }
 
 export async function handleFeishuCardAction(params: {
@@ -255,6 +355,30 @@ export async function handleFeishuCardAction(params: {
         return;
       }
 
+      if (envelope.a === FEISHU_JWXT_LOGIN_SUBMIT_ACTION) {
+        await handleFeishuJwxtLoginSubmit({
+          cfg,
+          accountId,
+          runtime,
+          event: {
+            operator: {
+              open_id: event.operator.open_id,
+            },
+            action: {
+              form_value: event.action.form_value,
+            },
+            context: {
+              chat_id: event.context.chat_id,
+            },
+          },
+          envelopeMetadata: envelope.m,
+          chatType: envelope.c?.t ?? (event.context.chat_id ? "group" : "p2p"),
+          sessionKey: envelope.c?.s,
+        });
+        completeFeishuCardActionToken({ token: event.token, accountId: account.accountId });
+        return;
+      }
+
       if (envelope.a === FEISHU_APPROVAL_CANCEL_ACTION) {
         await sendMessageFeishu({
           cfg,
@@ -302,6 +426,39 @@ export async function handleFeishuCardAction(params: {
     }
 
     const content = buildFeishuCardActionTextFallback(event);
+
+    if (isLikelyJwxtFormSubmitAction(event.action)) {
+      log(
+        `feishu[${account.accountId}]: handling form submit fallback without structured envelope from ${event.operator.open_id}`,
+      );
+      const fallbackMetadata = resolveFeishuJwxtLoginSubmitMetadataFallback({
+        accountId: account.accountId,
+        operatorOpenId: event.operator.open_id,
+        chatId: event.context.chat_id,
+      });
+      const handled = await handleFeishuJwxtLoginSubmit({
+        cfg,
+        accountId,
+        runtime,
+        event: {
+          operator: {
+            open_id: event.operator.open_id,
+          },
+          action: {
+            form_value: event.action.form_value,
+          },
+          context: {
+            chat_id: event.context.chat_id,
+          },
+        },
+        envelopeMetadata: fallbackMetadata,
+        chatType: event.context.chat_id ? "group" : "p2p",
+      });
+      if (handled) {
+        completeFeishuCardActionToken({ token: event.token, accountId: account.accountId });
+        return;
+      }
+    }
 
     log(
       `feishu[${account.accountId}]: handling card action from ${event.operator.open_id}: ${content}`,

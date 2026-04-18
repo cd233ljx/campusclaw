@@ -4,6 +4,8 @@ export function buildFeishuCardButton(params: {
   label: string;
   value: FeishuCardInteractionEnvelope;
   type?: "default" | "primary" | "danger";
+  name?: string;
+  formActionType?: "submit" | "reset";
 }) {
   return {
     tag: "button",
@@ -13,6 +15,8 @@ export function buildFeishuCardButton(params: {
     },
     type: params.type ?? "default",
     value: params.value,
+    ...(params.name ? { name: params.name } : {}),
+    ...(params.formActionType ? { form_action_type: params.formActionType } : {}),
   };
 }
 

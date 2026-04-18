@@ -43,6 +43,7 @@ import { type FeishuPermissionError, resolveFeishuSenderName } from "./bot-sende
 import { createFeishuClient } from "./client.js";
 import { finalizeFeishuMessageProcessing, tryRecordMessagePersistent } from "./dedup.js";
 import { maybeCreateDynamicAgent } from "./dynamic-agent.js";
+import { maybeStartFeishuJwxtLoginFlow } from "./jwxt-login-flow.js";
 import { extractMentionTargets, isMentionForwardRequest } from "./mention.js";
 import {
   resolveFeishuGroupConfig,
@@ -579,10 +580,39 @@ export async function handleFeishuMessage(params: {
     const peerId = isGroup ? (groupSession?.peerId ?? ctx.chatId) : ctx.senderOpenId;
     const parentPeer = isGroup ? (groupSession?.parentPeer ?? null) : null;
     const replyInThread = isGroup ? (groupSession?.replyInThread ?? false) : false;
+    const isTopicSession =
+      isGroup &&
+      (groupSession?.groupSessionScope === "group_topic" ||
+        groupSession?.groupSessionScope === "group_topic_sender");
+    const configReplyInThread =
+      isGroup &&
+      (groupConfig?.replyInThread ?? feishuCfg?.replyInThread ?? "disabled") === "enabled";
+    const jwxtKickoffReplyTarget =
+      isTopicSession || configReplyInThread ? (ctx.rootId ?? ctx.messageId) : ctx.messageId;
     const feishuAcpConversationSupported =
       !isGroup ||
       groupSession?.groupSessionScope === "group_topic" ||
       groupSession?.groupSessionScope === "group_topic_sender";
+
+    const handledByJwxtLoginKickoff = await maybeStartFeishuJwxtLoginFlow({
+      cfg,
+      accountId: account.accountId,
+      runtime,
+      operatorOpenId: ctx.senderOpenId,
+      chatId: ctx.chatId,
+      chatType: isGroup ? "group" : "p2p",
+      messageText: ctx.content,
+      replyToMessageId: jwxtKickoffReplyTarget,
+      replyInThread,
+      rootId: ctx.rootId,
+      sessionKey: peerId,
+    });
+    if (handledByJwxtLoginKickoff) {
+      log(
+        `feishu[${account.accountId}]: jwxt login kickoff handled for ${ctx.senderOpenId} in ${ctx.chatId}`,
+      );
+      return;
+    }
 
     if (isGroup && groupSession) {
       log(
@@ -1033,13 +1063,6 @@ export async function handleFeishuMessage(params: {
     // - Normal groups (auto-detected threadReply from root_id): reply to the
     //   triggering message itself. Using rootId here would silently push the
     //   reply into a topic thread invisible in the main chat view (#32980).
-    const isTopicSession =
-      isGroup &&
-      (groupSession?.groupSessionScope === "group_topic" ||
-        groupSession?.groupSessionScope === "group_topic_sender");
-    const configReplyInThread =
-      isGroup &&
-      (groupConfig?.replyInThread ?? feishuCfg?.replyInThread ?? "disabled") === "enabled";
     const replyTargetMessageId =
       isTopicSession || configReplyInThread ? (ctx.rootId ?? ctx.messageId) : ctx.messageId;
     const threadReply = isGroup ? (groupSession?.threadReply ?? false) : false;

@@ -108,6 +108,33 @@ describe("feishu card interaction decoder", () => {
     expect(result).toEqual({ kind: "invalid", reason: "wrong_conversation" });
   });
 
+  it("allows p2p payloads when callback chat_id alias differs", () => {
+    const result = decodeFeishuCardAction({
+      event: {
+        operator: { open_id: "ou_user_1" },
+        context: { chat_id: "ou_user_1" },
+        action: {
+          value: createFeishuCardInteractionEnvelope({
+            k: "button",
+            a: "p2p-scoped",
+            c: {
+              u: "ou_user_1",
+              h: "oc_p2p_chat_1",
+              t: "p2p",
+              e: Date.now() + 60_000,
+            },
+          }),
+        },
+      },
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        kind: "structured",
+      }),
+    );
+  });
+
   it("rejects malformed chat-type context", () => {
     const result = decodeFeishuCardAction({
       event: {

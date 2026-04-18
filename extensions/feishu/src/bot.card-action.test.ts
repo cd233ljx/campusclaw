@@ -16,8 +16,18 @@ import {
 
 // Mock account resolution
 vi.mock("./accounts.js", () => ({
-  resolveFeishuAccount: vi.fn().mockReturnValue({ accountId: "mock-account" }),
-  resolveFeishuRuntimeAccount: vi.fn().mockReturnValue({ accountId: "mock-account" }),
+  resolveFeishuAccount: vi.fn(({ cfg, accountId }: { cfg?: unknown; accountId?: string } = {}) => ({
+    accountId: accountId ?? "mock-account",
+    config: ((cfg as { channels?: { feishu?: unknown } } | undefined)?.channels?.feishu ??
+      {}) as Record<string, unknown>,
+  })),
+  resolveFeishuRuntimeAccount: vi.fn(
+    ({ cfg, accountId }: { cfg?: unknown; accountId?: string } = {}) => ({
+      accountId: accountId ?? "mock-account",
+      config: ((cfg as { channels?: { feishu?: unknown } } | undefined)?.channels?.feishu ??
+        {}) as Record<string, unknown>,
+    }),
+  ),
 }));
 
 // Mock bot.js to verify handleFeishuMessage call
@@ -167,6 +177,50 @@ describe("Feishu Card Action Handler", () => {
     );
   });
 
+  it("handles jwxt form submit callbacks without structured action value", async () => {
+    const jwxtCfg = {
+      channels: {
+        feishu: {
+          appId: "cli_test",
+          appSecret: "secret_test",
+          jwxtLoginFlow: {
+            enabled: true,
+            baseUrl: "http://127.0.0.1:5111",
+            startPath: "/channel/feishu/jwxt/login/start",
+            submitPath: "/channel/feishu/jwxt/login/submit",
+            tenantKey: "default",
+          },
+        },
+      },
+    } as unknown as ClawdbotConfig;
+
+    const event: FeishuCardActionEvent = {
+      operator: { open_id: "ou123", user_id: "uid1", union_id: "un1" },
+      token: "tok-jwxt-no-value",
+      action: {
+        value: {},
+        tag: "button",
+        name: "jwxt_login_submit",
+        form_value: {
+          student_id: "20210001",
+          password: "password-demo",
+          captcha_code: "ABCD",
+        },
+      },
+      context: { open_id: "ou123", user_id: "uid1", chat_id: "oc_group_1" },
+    };
+
+    await handleFeishuCardAction({ cfg: jwxtCfg, event, runtime, accountId: "main" });
+
+    expect(sendMessageFeishuMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "chat:oc_group_1",
+        text: expect.stringContaining("登录票据已失效"),
+      }),
+    );
+    expect(handleFeishuMessage).not.toHaveBeenCalled();
+  });
+
   it("opens an approval card for metadata actions", async () => {
     const event: FeishuCardActionEvent = {
       operator: { open_id: "u123", user_id: "uid1", union_id: "un1" },
@@ -281,6 +335,79 @@ describe("Feishu Card Action Handler", () => {
     expect(sendMessageFeishuMock).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "chat:chat1",
+        text: expect.stringContaining("expired"),
+      }),
+    );
+    expect(handleFeishuMessage).not.toHaveBeenCalled();
+  });
+
+  it("falls back to user routing when stale callbacks only carry an open_id", async () => {
+    const event: FeishuCardActionEvent = {
+      operator: { open_id: "ou_user_1", user_id: "uid1", union_id: "un1" },
+      token: "tok6-p2p",
+      action: {
+        value: createFeishuCardInteractionEnvelope({
+          k: "quick",
+          a: "feishu.quick_actions.help",
+          q: "/help",
+          c: { u: "ou_user_1", e: Date.now() - 1, t: "p2p" },
+        }),
+        tag: "button",
+      },
+      context: { open_id: "ou_user_1", user_id: "uid1", chat_id: "ou_user_1" },
+    };
+
+    await handleFeishuCardAction({ cfg, event, runtime });
+
+    expect(sendMessageFeishuMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "user:ou_user_1",
+        text: expect.stringContaining("expired"),
+      }),
+    );
+    expect(handleFeishuMessage).not.toHaveBeenCalled();
+  });
+
+  it("falls back to open_id when stale notice chat target is invalid", async () => {
+    sendMessageFeishuMock
+      .mockRejectedValueOnce({
+        response: {
+          data: {
+            code: 230001,
+            msg: "Your request contains an invalid request parameter, ext=invalid receive_id",
+          },
+        },
+      })
+      .mockResolvedValueOnce({ messageId: "om_fallback" });
+
+    const event: FeishuCardActionEvent = {
+      operator: { open_id: "ou_user_2", user_id: "uid2", union_id: "un2" },
+      token: "tok6-receive-id-fallback",
+      action: {
+        value: createFeishuCardInteractionEnvelope({
+          k: "quick",
+          a: "feishu.quick_actions.help",
+          q: "/help",
+          c: { u: "ou_user_2", h: "oc_invalid_target", e: Date.now() - 1, t: "group" },
+        }),
+        tag: "button",
+      },
+      context: { open_id: "ou_user_2", user_id: "uid2", chat_id: "oc_invalid_target" },
+    };
+
+    await handleFeishuCardAction({ cfg, event, runtime });
+
+    expect(sendMessageFeishuMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        to: "chat:oc_invalid_target",
+        text: expect.stringContaining("expired"),
+      }),
+    );
+    expect(sendMessageFeishuMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        to: "user:ou_user_2",
         text: expect.stringContaining("expired"),
       }),
     );

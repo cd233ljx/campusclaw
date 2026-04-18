@@ -262,6 +262,11 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
               exclusiveMinimum: 0,
               maximum: 9007199254740991,
             },
+            maxFailureRetries: {
+              type: "integer",
+              exclusiveMinimum: 0,
+              maximum: 9007199254740991,
+            },
           },
           additionalProperties: false,
         },
@@ -559,6 +564,11 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
                     maximum: 9007199254740991,
                   },
                   firstRunLookbackMinutes: {
+                    type: "integer",
+                    exclusiveMinimum: 0,
+                    maximum: 9007199254740991,
+                  },
+                  maxFailureRetries: {
                     type: "integer",
                     exclusiveMinimum: 0,
                     maximum: 9007199254740991,
@@ -3690,6 +3700,48 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
           },
           additionalProperties: false,
         },
+        jwxtLoginFlow: {
+          type: "object",
+          properties: {
+            enabled: {
+              type: "boolean",
+            },
+            baseUrl: {
+              type: "string",
+              format: "uri",
+            },
+            startPath: {
+              type: "string",
+            },
+            submitPath: {
+              type: "string",
+            },
+            tenantKey: {
+              type: "string",
+            },
+            authHeader: {
+              type: "string",
+            },
+            authHeaderName: {
+              type: "string",
+            },
+            keywordPatterns: {
+              type: "array",
+              items: {
+                type: "string",
+              },
+            },
+            defaultToolName: {
+              type: "string",
+            },
+            timeoutMs: {
+              type: "integer",
+              exclusiveMinimum: 0,
+              maximum: 120000,
+            },
+          },
+          additionalProperties: false,
+        },
         actions: {
           type: "object",
           properties: {
@@ -4242,6 +4294,48 @@ export const GENERATED_BUNDLED_CHANNEL_CONFIG_METADATA = [
                   },
                   scopes: {
                     type: "boolean",
+                  },
+                },
+                additionalProperties: false,
+              },
+              jwxtLoginFlow: {
+                type: "object",
+                properties: {
+                  enabled: {
+                    type: "boolean",
+                  },
+                  baseUrl: {
+                    type: "string",
+                    format: "uri",
+                  },
+                  startPath: {
+                    type: "string",
+                  },
+                  submitPath: {
+                    type: "string",
+                  },
+                  tenantKey: {
+                    type: "string",
+                  },
+                  authHeader: {
+                    type: "string",
+                  },
+                  authHeaderName: {
+                    type: "string",
+                  },
+                  keywordPatterns: {
+                    type: "array",
+                    items: {
+                      type: "string",
+                    },
+                  },
+                  defaultToolName: {
+                    type: "string",
+                  },
+                  timeoutMs: {
+                    type: "integer",
+                    exclusiveMinimum: 0,
+                    maximum: 120000,
                   },
                 },
                 additionalProperties: false,

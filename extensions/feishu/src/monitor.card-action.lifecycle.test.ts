@@ -252,8 +252,143 @@ describe("Feishu card-action lifecycle", () => {
     });
 
     expect(lastRuntime?.error).toHaveBeenCalledWith(
-      "feishu[acct-card]: ignoring malformed card action payload",
+      expect.stringContaining("feishu[acct-card]: ignoring malformed card action payload summary="),
     );
     expect(dispatchReplyFromConfigMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts schema 2.0 callbacks using context.open_chat_id", async () => {
+    const onCardAction = await setupLifecycleMonitor();
+
+    await onCardAction({
+      schema: "2.0",
+      header: {
+        event_id: "evt-open-chat-id",
+        event_type: "card.action.trigger",
+      },
+      event: {
+        operator: {
+          open_id: "ou_user1",
+          user_id: "user_1",
+          union_id: "union_1",
+        },
+        token: "tok-open-chat-id",
+        action: {
+          tag: "button",
+          value: createFeishuCardInteractionEnvelope({
+            k: "quick",
+            a: "feishu.quick_actions.help",
+            q: "/help",
+            c: {
+              u: "ou_user1",
+              h: "p2p:ou_user1",
+              t: "p2p",
+              e: Date.now() + 60_000,
+            },
+          }),
+        },
+        context: {
+          open_id: "ou_user1",
+          user_id: "user_1",
+          open_chat_id: "p2p:ou_user1",
+        },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(dispatchReplyFromConfigMock).toHaveBeenCalledTimes(1);
+    });
+    expect(createFeishuReplyDispatcherMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "p2p:ou_user1",
+      }),
+    );
+  });
+
+  it("accepts nested schema 2.0 callbacks with stringified action value and event_id fallback token", async () => {
+    const onCardAction = await setupLifecycleMonitor();
+
+    await onCardAction({
+      schema: "2.0",
+      header: {
+        event_id: "evt-nested-card-action",
+        event_type: "card.action.trigger",
+      },
+      event: {
+        event: {
+          operator_id: {
+            open_id: "ou_user1",
+            user_id: "user_1",
+          },
+          action: {
+            tag: "button",
+            value: JSON.stringify(
+              createFeishuCardInteractionEnvelope({
+                k: "quick",
+                a: "feishu.quick_actions.help",
+                q: "/help",
+                c: {
+                  u: "ou_user1",
+                  h: "p2p:ou_user1",
+                  t: "p2p",
+                  e: Date.now() + 60_000,
+                },
+              }),
+            ),
+          },
+          context: {
+            open_id: "ou_user1",
+            open_chat_id: "p2p:ou_user1",
+          },
+        },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(dispatchReplyFromConfigMock).toHaveBeenCalledTimes(1);
+    });
+    expect(createFeishuReplyDispatcherMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        chatId: "p2p:ou_user1",
+      }),
+    );
+  });
+
+  it("accepts form callbacks with form_value but missing action.value", async () => {
+    const onCardAction = await setupLifecycleMonitor();
+
+    await onCardAction({
+      schema: "2.0",
+      event: {
+        operator: {
+          open_id: "ou_user1",
+          user_id: "user_1",
+          union_id: "union_1",
+        },
+        token: "tok-form-value-only",
+        action: {
+          tag: "button",
+          name: "jwxt_login_submit",
+          form_value: {
+            student_id: "20210001",
+            password: "password-demo",
+            captcha_code: "ABCD",
+          },
+        },
+        context: {
+          open_id: "ou_user1",
+          user_id: "user_1",
+          open_chat_id: "p2p:ou_user1",
+        },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(dispatchReplyFromConfigMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(lastRuntime?.error).not.toHaveBeenCalledWith(
+      expect.stringContaining("ignoring malformed card action payload summary="),
+    );
   });
 });

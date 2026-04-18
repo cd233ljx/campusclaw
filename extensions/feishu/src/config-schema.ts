@@ -104,6 +104,27 @@ const FeishuToolsConfigSchema = z
   .optional();
 
 /**
+ * JWXT chat login flow configuration.
+ * Allows Feishu channel to trigger captcha-login cards and submit credentials
+ * back to a dedicated backend orchestration service.
+ */
+const FeishuJwxtLoginFlowSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    baseUrl: z.string().url().optional(),
+    startPath: z.string().optional(),
+    submitPath: z.string().optional(),
+    tenantKey: z.string().optional(),
+    authHeader: z.string().optional(),
+    authHeaderName: z.string().optional(),
+    keywordPatterns: z.array(z.string()).optional(),
+    defaultToolName: z.string().optional(),
+    timeoutMs: z.number().int().positive().max(120_000).optional(),
+  })
+  .strict()
+  .optional();
+
+/**
  * Group session scope for routing Feishu group messages.
  * - "group" (default): one session per group chat
  * - "group_sender": one session per (group + sender)
@@ -177,6 +198,7 @@ const FeishuSharedConfigShape = {
   renderMode: RenderModeSchema,
   streaming: StreamingModeSchema,
   tools: FeishuToolsConfigSchema,
+  jwxtLoginFlow: FeishuJwxtLoginFlowSchema,
   actions: ChannelActionsSchema,
   replyInThread: ReplyInThreadSchema,
   reactionNotifications: ReactionNotificationModeSchema,

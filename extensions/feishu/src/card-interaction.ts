@@ -155,7 +155,11 @@ export function decodeFeishuCardAction(params: {
 
     const expectedChat = actionValue.c.h?.trim();
     if (expectedChat && expectedChat !== (event.context.chat_id ?? "").trim()) {
-      return { kind: "invalid", reason: "wrong_conversation" };
+      // Feishu p2p callbacks can return an open_id-style context instead of the
+      // original chat_id; user binding is sufficient to scope p2p interactions.
+      if (actionValue.c.t !== "p2p") {
+        return { kind: "invalid", reason: "wrong_conversation" };
+      }
     }
   }
 
