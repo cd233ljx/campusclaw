@@ -3,6 +3,7 @@
  * Calls gateway RPC methods and returns formatted results.
  */
 
+import { resolveCampusSessionSendParams } from "../campus-session-storage.ts";
 import {
   createChatModelOverride,
   resolvePreferredServerChatModelValue,
@@ -796,6 +797,7 @@ async function executeSteer(
       message: resolved.message,
       deliver: false,
       idempotencyKey: generateUUID(),
+      ...(await resolveCampusSessionSendParams()),
     });
     return {
       content: resolved.label ? `Steered \`${resolved.label}\`.` : "Steered.",

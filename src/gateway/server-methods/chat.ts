@@ -23,6 +23,10 @@ import { resolveSendPolicy } from "../../sessions/send-policy.js";
 import { parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import { emitSessionTranscriptUpdate } from "../../sessions/transcript-events.js";
 import {
+  buildCampusSessionHeaders,
+  mergeCampusSessionHeaders,
+} from "../../shared/campus-session-auth.js";
+import {
   parseAssistantTextSignature,
   resolveAssistantMessagePhase,
 } from "../../shared/chat-message-content.js";
@@ -1786,6 +1790,8 @@ export const chatHandlers: GatewayRequestHandlers = {
         content?: unknown;
       }>;
       timeoutMs?: number;
+      jwxtSessionId?: string;
+      secondClassSessionId?: string;
       systemInputProvenance?: InputProvenance;
       systemProvenanceReceipt?: string;
       idempotencyKey: string;
@@ -1967,6 +1973,13 @@ export const chatHandlers: GatewayRequestHandlers = {
       const trimmedMessage = parsedMessage.trim();
       const injectThinking = Boolean(
         p.thinking && trimmedMessage && !trimmedMessage.startsWith("/"),
+      );
+      const campusSessionHeaders = mergeCampusSessionHeaders(
+        client?.campusSessionHeaders,
+        buildCampusSessionHeaders({
+          jwxtSessionId: p.jwxtSessionId,
+          secondClassSessionId: p.secondClassSessionId,
+        }),
       );
       const commandBody = injectThinking ? `/think ${p.thinking} ${parsedMessage}` : parsedMessage;
       const messageForAgent = systemProvenanceReceipt
@@ -2164,6 +2177,7 @@ export const chatHandlers: GatewayRequestHandlers = {
           abortSignal: abortController.signal,
           images: parsedImages.length > 0 ? parsedImages : undefined,
           imageOrder: imageOrder.length > 0 ? imageOrder : undefined,
+          campusSessionHeaders,
           onAgentRunStart: (runId) => {
             agentRunStarted = true;
             void emitUserTranscriptUpdate();

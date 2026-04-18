@@ -585,6 +585,7 @@ export async function runEmbeddedAttempt(
           sessionKey: params.sessionKey,
           workspaceDir: effectiveWorkspace,
           cfg: params.config,
+          campusSessionHeaders: params.campusSessionHeaders,
         })
       : undefined;
     const bundleMcpRuntime = bundleMcpSessionRuntime

@@ -1,5 +1,6 @@
 import type { ImageContent } from "@mariozechner/pi-ai";
 import type { PromptImageOrderEntry } from "../media/prompt-image-order.js";
+import type { CampusSessionHeaders } from "../shared/campus-session-auth.js";
 import type { ReplyPayload } from "./reply-payload.js";
 import type { TypingController } from "./reply/typing.js";
 
@@ -38,6 +39,8 @@ export type GetReplyOptions = {
   images?: ImageContent[];
   /** Original inline/offloaded attachment order for inbound images. */
   imageOrder?: PromptImageOrderEntry[];
+  /** Session-scoped campus auth headers captured from the requesting browser. */
+  campusSessionHeaders?: CampusSessionHeaders;
   /** Notifies when an agent run actually starts (useful for webchat command handling). */
   onAgentRunStart?: (runId: string) => void;
   onReplyStart?: () => Promise<void> | void;

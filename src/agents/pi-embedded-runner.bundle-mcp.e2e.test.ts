@@ -38,6 +38,7 @@ vi.mock("./pi-bundle-mcp-tools.js", () => ({
     sessionKey: "agent:test:bundle-mcp-e2e",
     workspaceDir: "/tmp",
     configFingerprint: "test",
+    campusSessionHeadersFingerprint: "",
     createdAt: Date.now(),
     lastUsedAt: Date.now(),
     markUsed: () => {},

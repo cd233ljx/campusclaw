@@ -594,6 +594,17 @@ export async function handleFeishuMessage(params: {
       groupSession?.groupSessionScope === "group_topic" ||
       groupSession?.groupSessionScope === "group_topic_sender";
 
+    const kickoffRoute = core.channel.routing.resolveAgentRoute({
+      cfg,
+      channel: "feishu",
+      accountId: account.accountId,
+      peer: {
+        kind: isGroup ? "group" : "direct",
+        id: peerId,
+      },
+      parentPeer,
+    });
+
     const handledByJwxtLoginKickoff = await maybeStartFeishuJwxtLoginFlow({
       cfg,
       accountId: account.accountId,
@@ -620,16 +631,7 @@ export async function handleFeishuMessage(params: {
       );
     }
 
-    let route = core.channel.routing.resolveAgentRoute({
-      cfg,
-      channel: "feishu",
-      accountId: account.accountId,
-      peer: {
-        kind: isGroup ? "group" : "direct",
-        id: peerId,
-      },
-      parentPeer,
-    });
+    let route = kickoffRoute;
 
     // Dynamic agent creation for DM users
     // When enabled, creates a unique agent instance with its own workspace for each DM user.

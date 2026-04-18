@@ -35,6 +35,7 @@ import { upsertPresence } from "../../../infra/system-presence.js";
 import { loadVoiceWakeConfig } from "../../../infra/voicewake.js";
 import { rawDataToString } from "../../../infra/ws.js";
 import type { createSubsystemLogger } from "../../../logging/subsystem.js";
+import { buildCampusSessionHeadersFromCookieHeader } from "../../../shared/campus-session-auth.js";
 import {
   resolveBootstrapProfileScopesForRole,
   type DeviceBootstrapProfile,
@@ -257,6 +258,11 @@ export function attachGatewayWsMessageHandler(params: {
     allowRealIpFallback,
   });
   const peerLabel = endpoint ?? remoteAddr ?? "n/a";
+  const campusSessionHeaders = buildCampusSessionHeadersFromCookieHeader(
+    Array.isArray(upgradeReq.headers.cookie)
+      ? upgradeReq.headers.cookie[0]
+      : upgradeReq.headers.cookie,
+  );
 
   // If proxy headers are present but the remote address isn't trusted, don't treat
   // the connection as local. This prevents auth bypass when running behind a reverse
@@ -1257,6 +1263,7 @@ export function attachGatewayWsMessageHandler(params: {
           canvasHostUrl,
           canvasCapability,
           canvasCapabilityExpiresAtMs,
+          campusSessionHeaders,
         };
         setSocketMaxPayload(socket, MAX_PAYLOAD_BYTES);
         setClient(nextClient);

@@ -762,6 +762,7 @@ export async function runMemoryFlushIfNeeded(params: {
           bootstrapPromptWarningSignaturesSeen,
           bootstrapPromptWarningSignature:
             bootstrapPromptWarningSignaturesSeen[bootstrapPromptWarningSignaturesSeen.length - 1],
+          campusSessionHeaders: params.opts?.campusSessionHeaders,
           abortSignal: params.replyOperation.abortSignal,
           replyOperation: params.replyOperation,
           onAgentEvent: (evt) => {

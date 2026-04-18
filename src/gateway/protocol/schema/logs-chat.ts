@@ -44,6 +44,8 @@ export const ChatSendParamsSchema = Type.Object(
     originatingThreadId: Type.Optional(Type.String()),
     attachments: Type.Optional(Type.Array(Type.Unknown())),
     timeoutMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    jwxtSessionId: Type.Optional(Type.String()),
+    secondClassSessionId: Type.Optional(Type.String()),
     systemInputProvenance: Type.Optional(InputProvenanceSchema),
     systemProvenanceReceipt: Type.Optional(Type.String()),
     idempotencyKey: NonEmptyString,

@@ -29,6 +29,7 @@ describe("session MCP runtime", () => {
         sessionId: "session-colliding-tools",
         workspaceDir: "/tmp",
         configFingerprint: "fingerprint",
+        campusSessionHeadersFingerprint: "",
         createdAt: 0,
         lastUsedAt: 0,
         markUsed: () => {},
@@ -254,6 +255,70 @@ describe("session MCP runtime", () => {
     expect(resultA.content[0]).toMatchObject({ type: "text", text: "FROM-CONFIG-A" });
     expect(resultB.content[0]).toMatchObject({ type: "text", text: "FROM-CONFIG-B" });
     expect(await fs.readFile(startupCounterPath, "utf8")).toBe("2");
+  });
+
+  it("applies campus session headers alongside feishu-scoped headers", async () => {
+    expect(
+      __testing.applySessionScopedMcpHeaders({
+        rawServer: {
+          transport: "streamable-http",
+          url: "http://127.0.0.1:5001/mcp",
+          headers: {
+            authorization: "Bearer test",
+          },
+        },
+        sessionKey: "agent:main:feishu:tenant-a:direct:ou_123",
+        campusSessionHeaders: {
+          "X-JWXT-Session-ID": "jwxt-session-1",
+          "X-Second-Class-Session-ID": "second-session-1",
+        },
+      }),
+    ).toEqual({
+      transport: "streamable-http",
+      url: "http://127.0.0.1:5001/mcp",
+      headers: {
+        authorization: "Bearer test",
+        "X-Feishu-Open-ID": "ou_123",
+        "X-Feishu-User-ID": "ou_123",
+        "X-Channel": "feishu",
+        "X-Tenant-Key": "tenant-a",
+        "X-JWXT-Session-ID": "jwxt-session-1",
+        "X-Second-Class-Session-ID": "second-session-1",
+      },
+    });
+  });
+
+  it("recreates the session runtime when campus session headers change", async () => {
+    const workspaceDir = await makeTempDir("openclaw-bundle-mcp-tools-");
+    const cfg = {
+      mcp: {
+        servers: {},
+      },
+    };
+
+    const runtimeA = await getOrCreateSessionMcpRuntime({
+      sessionId: "session-campus-auth",
+      sessionKey: "agent:test:campus-auth",
+      workspaceDir,
+      cfg,
+      campusSessionHeaders: {
+        "X-JWXT-Session-ID": "jwxt-a",
+      },
+    });
+    const runtimeB = await getOrCreateSessionMcpRuntime({
+      sessionId: "session-campus-auth",
+      sessionKey: "agent:test:campus-auth",
+      workspaceDir,
+      cfg,
+      campusSessionHeaders: {
+        "X-JWXT-Session-ID": "jwxt-b",
+      },
+    });
+
+    expect(runtimeA).not.toBe(runtimeB);
+    expect(runtimeA.campusSessionHeadersFingerprint).not.toBe(
+      runtimeB.campusSessionHeadersFingerprint,
+    );
   });
 
   it("disposes startup-in-flight runtimes without leaking MCP processes", async () => {

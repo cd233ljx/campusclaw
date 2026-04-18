@@ -1,5 +1,6 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { CampusSessionHeaders } from "../shared/campus-session-auth.js";
 import type { AnyAgentTool } from "./tools/common.js";
 
 export type BundleMcpToolRuntime = {
@@ -35,6 +36,7 @@ export type SessionMcpRuntime = {
   sessionKey?: string;
   workspaceDir: string;
   configFingerprint: string;
+  campusSessionHeadersFingerprint: string;
   createdAt: number;
   lastUsedAt: number;
   getCatalog: () => Promise<McpToolCatalog>;
@@ -49,6 +51,7 @@ export type SessionMcpRuntimeManager = {
     sessionKey?: string;
     workspaceDir: string;
     cfg?: OpenClawConfig;
+    campusSessionHeaders?: CampusSessionHeaders;
   }) => Promise<SessionMcpRuntime>;
   bindSessionKey: (sessionKey: string, sessionId: string) => void;
   resolveSessionId: (sessionKey: string) => string | undefined;

@@ -5,6 +5,10 @@ import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { logWarn } from "../logger.js";
+import {
+  createCampusSessionHeadersFingerprint,
+  type CampusSessionHeaders,
+} from "../shared/campus-session-auth.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { redactSensitiveUrlLikeString } from "../shared/net/redact-sensitive-url.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
@@ -131,24 +135,33 @@ function resolveFeishuSessionIdentity(sessionKey: string | undefined): {
 function applySessionScopedMcpHeaders(params: {
   rawServer: unknown;
   sessionKey?: string;
+  campusSessionHeaders?: CampusSessionHeaders;
 }): unknown {
-  const identity = resolveFeishuSessionIdentity(params.sessionKey);
-  if (!identity || !isMcpConfigRecord(params.rawServer)) {
+  if (!isMcpConfigRecord(params.rawServer)) {
     return params.rawServer;
   }
 
-  const existingHeaders = isMcpConfigRecord(params.rawServer.headers)
-    ? params.rawServer.headers
-    : {};
+  const identity = resolveFeishuSessionIdentity(params.sessionKey);
+  const scopedHeaders: Record<string, string> = {
+    ...(identity
+      ? {
+          "X-Feishu-Open-ID": identity.openId,
+          "X-Feishu-User-ID": identity.openId,
+          "X-Channel": "feishu",
+          "X-Tenant-Key": identity.tenantKey,
+        }
+      : {}),
+    ...params.campusSessionHeaders,
+  };
+  if (Object.keys(scopedHeaders).length === 0) {
+    return params.rawServer;
+  }
 
   return {
     ...params.rawServer,
     headers: {
-      ...existingHeaders,
-      "X-Feishu-Open-ID": identity.openId,
-      "X-Feishu-User-ID": identity.openId,
-      "X-Channel": "feishu",
-      "X-Tenant-Key": identity.tenantKey,
+      ...(isMcpConfigRecord(params.rawServer.headers) ? params.rawServer.headers : {}),
+      ...scopedHeaders,
     },
   };
 }
@@ -185,12 +198,16 @@ export function createSessionMcpRuntime(params: {
   sessionKey?: string;
   workspaceDir: string;
   cfg?: OpenClawConfig;
+  campusSessionHeaders?: CampusSessionHeaders;
 }): SessionMcpRuntime {
   const { loaded, fingerprint: configFingerprint } = loadSessionMcpConfig({
     workspaceDir: params.workspaceDir,
     cfg: params.cfg,
     logDiagnostics: true,
   });
+  const campusSessionHeadersFingerprint = createCampusSessionHeadersFingerprint(
+    params.campusSessionHeaders,
+  );
   const createdAt = Date.now();
   let lastUsedAt = createdAt;
   let disposed = false;
@@ -230,7 +247,11 @@ export function createSessionMcpRuntime(params: {
           failIfDisposed();
           const resolved = resolveMcpTransport(
             serverName,
-            applySessionScopedMcpHeaders({ rawServer, sessionKey: params.sessionKey }),
+            applySessionScopedMcpHeaders({
+              rawServer,
+              sessionKey: params.sessionKey,
+              campusSessionHeaders: params.campusSessionHeaders,
+            }),
           );
           if (!resolved) {
             continue;
@@ -327,6 +348,7 @@ export function createSessionMcpRuntime(params: {
     sessionKey: params.sessionKey,
     workspaceDir: params.workspaceDir,
     configFingerprint,
+    campusSessionHeadersFingerprint,
     createdAt,
     get lastUsedAt() {
       return lastUsedAt;
@@ -370,6 +392,7 @@ function createSessionMcpRuntimeManager(): SessionMcpRuntimeManager {
       promise: Promise<SessionMcpRuntime>;
       workspaceDir: string;
       configFingerprint: string;
+      campusSessionHeadersFingerprint: string;
     }
   >();
 
@@ -383,11 +406,15 @@ function createSessionMcpRuntimeManager(): SessionMcpRuntimeManager {
         cfg: params.cfg,
         logDiagnostics: false,
       });
+      const nextCampusSessionHeadersFingerprint = createCampusSessionHeadersFingerprint(
+        params.campusSessionHeaders,
+      );
       const existing = runtimesBySessionId.get(params.sessionId);
       if (existing) {
         if (
           existing.workspaceDir !== params.workspaceDir ||
-          existing.configFingerprint !== nextFingerprint
+          existing.configFingerprint !== nextFingerprint ||
+          existing.campusSessionHeadersFingerprint !== nextCampusSessionHeadersFingerprint
         ) {
           runtimesBySessionId.delete(params.sessionId);
           await existing.dispose();
@@ -400,7 +427,8 @@ function createSessionMcpRuntimeManager(): SessionMcpRuntimeManager {
       if (inFlight) {
         if (
           inFlight.workspaceDir === params.workspaceDir &&
-          inFlight.configFingerprint === nextFingerprint
+          inFlight.configFingerprint === nextFingerprint &&
+          inFlight.campusSessionHeadersFingerprint === nextCampusSessionHeadersFingerprint
         ) {
           return inFlight.promise;
         }
@@ -415,6 +443,7 @@ function createSessionMcpRuntimeManager(): SessionMcpRuntimeManager {
           sessionKey: params.sessionKey,
           workspaceDir: params.workspaceDir,
           cfg: params.cfg,
+          campusSessionHeaders: params.campusSessionHeaders,
         }),
       ).then((runtime) => {
         runtime.markUsed();
@@ -425,6 +454,7 @@ function createSessionMcpRuntimeManager(): SessionMcpRuntimeManager {
         promise: created,
         workspaceDir: params.workspaceDir,
         configFingerprint: nextFingerprint,
+        campusSessionHeadersFingerprint: nextCampusSessionHeadersFingerprint,
       });
       try {
         return await created;
@@ -493,6 +523,7 @@ export async function getOrCreateSessionMcpRuntime(params: {
   sessionKey?: string;
   workspaceDir: string;
   cfg?: OpenClawConfig;
+  campusSessionHeaders?: CampusSessionHeaders;
 }): Promise<SessionMcpRuntime> {
   return await getSessionMcpRuntimeManager().getOrCreate(params);
 }
@@ -512,4 +543,5 @@ export const __testing = {
   getCachedSessionIds() {
     return getSessionMcpRuntimeManager().listSessionIds();
   },
+  applySessionScopedMcpHeaders,
 };

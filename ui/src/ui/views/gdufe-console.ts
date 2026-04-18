@@ -1,5 +1,6 @@
 import { LitElement, html } from "lit";
 import { state } from "lit/decorators.js";
+import { clearJwxtSessionId, storeJwxtSessionId } from "../campus-session-storage.ts";
 
 const GDUFE_API_BASE_STORAGE_KEY = "openclaw.gdufe.apiBaseUrl.v1";
 const DEFAULT_GDUFE_API_BASE_URL = "http://127.0.0.1:5001";
@@ -8,17 +9,20 @@ type JwxtStatusResponse = {
   loggedIn?: boolean;
   studentName?: string;
   username?: string;
+  sessionId?: string;
 };
 
 type JwxtCaptchaResponse = {
   success?: boolean;
   captcha?: string;
+  sessionId?: string;
   error?: string;
 };
 
 type JwxtLoginResponse = {
   success?: boolean;
   studentName?: string;
+  sessionId?: string;
   error?: string;
 };
 
@@ -254,10 +258,14 @@ export class GdufeConsoleView extends LitElement {
       });
       this.loggedIn = payload.loggedIn === true;
       this.studentName = payload.studentName ?? "";
+      if (this.loggedIn && payload.sessionId) {
+        storeJwxtSessionId(payload.sessionId);
+      }
       if (this.loggedIn && payload.username) {
         this.username = payload.username;
       }
       if (!this.loggedIn) {
+        clearJwxtSessionId();
         this.studentName = "";
         this.grades = [];
         this.gradeSearchQuery = "";
@@ -318,6 +326,7 @@ export class GdufeConsoleView extends LitElement {
       }
       this.loggedIn = true;
       this.studentName = payload.studentName ?? this.username;
+      storeJwxtSessionId(payload.sessionId);
       this.password = "";
       this.captchaCode = "";
       await this.loadGrades();
@@ -339,6 +348,7 @@ export class GdufeConsoleView extends LitElement {
         method: "POST",
       });
       this.loggedIn = false;
+      clearJwxtSessionId();
       this.studentName = "";
       this.password = "";
       this.captchaCode = "";

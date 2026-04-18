@@ -6,6 +6,7 @@ import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import type { PromptImageOrderEntry } from "../../../media/prompt-image-order.js";
 import type { CommandQueueEnqueueFn } from "../../../process/command-queue.types.js";
 import type { InputProvenance } from "../../../sessions/input-provenance.js";
+import type { CampusSessionHeaders } from "../../../shared/campus-session-auth.js";
 import type { ExecElevatedDefaults, ExecToolDefaults } from "../../bash-tools.exec-types.js";
 import type { AgentStreamParams, ClientToolDefinition } from "../../command/shared-types.js";
 import type { AgentInternalEvent } from "../../internal-events.js";
@@ -72,6 +73,8 @@ export type RunEmbeddedPiAgentParams = {
   prompt: string;
   images?: ImageContent[];
   imageOrder?: PromptImageOrderEntry[];
+  /** Browser-derived campus auth headers to forward into MCP tools. */
+  campusSessionHeaders?: CampusSessionHeaders;
   /** Optional client-provided tools (OpenResponses hosted tools). */
   clientTools?: ClientToolDefinition[];
   /** Disable built-in tools for this run (LLM-only mode). */

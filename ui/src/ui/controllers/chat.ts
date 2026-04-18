@@ -1,4 +1,5 @@
 import { resetToolStream } from "../app-tool-stream.ts";
+import { resolveCampusSessionSendParams } from "../campus-session-storage.ts";
 import { extractText } from "../chat/message-extract.ts";
 import { formatConnectError } from "../connect-error.ts";
 import { GatewayRequestError, type GatewayBrowserClient } from "../gateway.ts";
@@ -239,6 +240,7 @@ async function requestChatSend(
     deliver: false,
     idempotencyKey: params.runId,
     attachments: buildApiAttachments(params.attachments),
+    ...(await resolveCampusSessionSendParams()),
   });
 }
 

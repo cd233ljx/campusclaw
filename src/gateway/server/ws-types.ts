@@ -1,4 +1,5 @@
 import type { WebSocket } from "ws";
+import type { CampusSessionHeaders } from "../../shared/campus-session-auth.js";
 import type { ConnectParams } from "../protocol/index.js";
 
 export type GatewayWsClient = {
@@ -12,4 +13,5 @@ export type GatewayWsClient = {
   canvasHostUrl?: string;
   canvasCapability?: string;
   canvasCapabilityExpiresAtMs?: number;
+  campusSessionHeaders?: CampusSessionHeaders;
 };

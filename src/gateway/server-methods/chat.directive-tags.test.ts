@@ -32,6 +32,9 @@ const mockState = vi.hoisted(() => ({
   lastDispatchCtx: undefined as MsgContext | undefined,
   lastDispatchImages: undefined as Array<{ mimeType: string; data: string }> | undefined,
   lastDispatchImageOrder: undefined as string[] | undefined,
+  lastDispatchCampusSessionHeaders: undefined as
+    | { "X-JWXT-Session-ID"?: string; "X-Second-Class-Session-ID"?: string }
+    | undefined,
   modelCatalog: null as ModelCatalogEntry[] | null,
   emittedTranscriptUpdates: [] as Array<{
     sessionFile: string;
@@ -109,11 +112,16 @@ vi.mock("../../auto-reply/dispatch.js", () => ({
         onAgentRunStart?: (runId: string) => void;
         images?: Array<{ mimeType: string; data: string }>;
         imageOrder?: string[];
+        campusSessionHeaders?: {
+          "X-JWXT-Session-ID"?: string;
+          "X-Second-Class-Session-ID"?: string;
+        };
       };
     }) => {
       mockState.lastDispatchCtx = params.ctx;
       mockState.lastDispatchImages = params.replyOptions?.images;
       mockState.lastDispatchImageOrder = params.replyOptions?.imageOrder;
+      mockState.lastDispatchCampusSessionHeaders = params.replyOptions?.campusSessionHeaders;
       if (mockState.dispatchError) {
         throw mockState.dispatchError;
       }
@@ -409,6 +417,7 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
     mockState.lastDispatchCtx = undefined;
     mockState.lastDispatchImages = undefined;
     mockState.lastDispatchImageOrder = undefined;
+    mockState.lastDispatchCampusSessionHeaders = undefined;
     mockState.modelCatalog = null;
     mockState.emittedTranscriptUpdates = [];
     mockState.savedMediaResults = [];
@@ -2038,6 +2047,27 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
 
     expect(mockState.lastDispatchImages).toHaveLength(1);
     expect(mockState.lastDispatchImageOrder).toEqual(["inline", "offloaded"]);
+  });
+
+  it("passes explicit campus session ids into reply options for tool runs", async () => {
+    createTranscriptFixture("openclaw-chat-send-campus-auth-");
+    const context = createChatContext();
+    const respond = vi.fn();
+
+    await runNonStreamingChatSend({
+      context,
+      respond,
+      idempotencyKey: "run-campus-auth",
+      requestParams: {
+        jwxtSessionId: "jwxt-session-xyz",
+        secondClassSessionId: "second-class-session-xyz",
+      },
+    });
+
+    expect(mockState.lastDispatchCampusSessionHeaders).toEqual({
+      "X-JWXT-Session-ID": "jwxt-session-xyz",
+      "X-Second-Class-Session-ID": "second-class-session-xyz",
+    });
   });
 
   it("maps media offload failures to UNAVAILABLE in chat.send", async () => {
