@@ -581,6 +581,79 @@ describe("createFeishuReplyDispatcher streaming behavior", () => {
     expect(sendMessageFeishuMock).not.toHaveBeenCalled();
   });
 
+  it("infers jwxt login flow from original message when tool auth text is generic", async () => {
+    startFeishuJwxtLoginFlowForToolMock.mockResolvedValueOnce(true);
+    const { options } = createDispatcherHarness({
+      operatorOpenId: "ou_user",
+      chatType: "group",
+      originalMessageText: "帮我查这学期成绩",
+    });
+
+    await options.deliver({ text: "请先登录后再查询" }, { kind: "tool" });
+
+    expect(startFeishuJwxtLoginFlowForToolMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorOpenId: "ou_user",
+        chatType: "group",
+        toolName: "jwxt.get_grades",
+        originalMessageText: "帮我查这学期成绩",
+      }),
+    );
+    expect(sendMessageFeishuMock).not.toHaveBeenCalled();
+  });
+
+  it("infers second-class login flow from original message when tool auth text is generic", async () => {
+    startFeishuJwxtLoginFlowForToolMock.mockResolvedValueOnce(true);
+    const { options } = createDispatcherHarness({
+      operatorOpenId: "ou_user",
+      chatType: "p2p",
+      originalMessageText: "帮我看看第二课堂学分",
+    });
+
+    await options.deliver({ text: "会话已过期，请重新登录" }, { kind: "tool" });
+
+    expect(startFeishuJwxtLoginFlowForToolMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorOpenId: "ou_user",
+        chatType: "p2p",
+        toolName: "second_class.get_credit_summary",
+        originalMessageText: "帮我看看第二课堂学分",
+      }),
+    );
+    expect(sendMessageFeishuMock).not.toHaveBeenCalled();
+  });
+
+  it("starts jwxt login flow for final auth text when tool summaries are suppressed upstream", async () => {
+    startFeishuJwxtLoginFlowForToolMock.mockResolvedValueOnce(true);
+    const { options } = createDispatcherHarness({
+      operatorOpenId: "ou_user",
+      chatType: "group",
+      originalMessageText: "明天有什么课",
+      sessionKey: "agent:demo:feishu:group:oc_chat",
+      replyToMessageId: "om_parent",
+      replyInThread: true,
+    });
+
+    await options.deliver(
+      { text: "教务登录已过期，需要重新登录后才能查看课表。" },
+      { kind: "final" },
+    );
+
+    expect(startFeishuJwxtLoginFlowForToolMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorOpenId: "ou_user",
+        chatId: "oc_chat",
+        chatType: "group",
+        toolName: "jwxt.get_grades",
+        originalMessageText: "明天有什么课",
+        replyToMessageId: "om_parent",
+        replyInThread: true,
+      }),
+    );
+    expect(sendMessageFeishuMock).not.toHaveBeenCalled();
+    expect(sendStructuredCardFeishuMock).not.toHaveBeenCalled();
+  });
+
   it("starts second-class login flow for plain auth error text", async () => {
     startFeishuJwxtLoginFlowForToolMock.mockResolvedValueOnce(true);
     const { options } = createDispatcherHarness({

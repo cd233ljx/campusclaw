@@ -200,6 +200,24 @@ function parseFeishuAuthRequiredToolResult(text: string): FeishuAuthRequiredTool
   return null;
 }
 
+function inferAuthRequiredSessionFromOriginalMessage(
+  originalMessageText: string | undefined,
+): FeishuAuthRequiredToolResult | null {
+  const normalized = originalMessageText?.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (SECOND_CLASS_AUTH_DOMAIN_HINT.test(normalized)) {
+    return { requiredSession: "second_class" };
+  }
+  if (JWXT_AUTH_DOMAIN_HINT.test(normalized)) {
+    return { requiredSession: "jwxt" };
+  }
+
+  return null;
+}
+
 export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherParams) {
   const core = getFeishuRuntime();
   const {
@@ -492,8 +510,12 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
           return;
         }
 
-        if (info?.kind === "tool" && shouldDeliverText) {
-          const authRequired = parseFeishuAuthRequiredToolResult(text);
+        if (info?.kind !== "block" && shouldDeliverText) {
+          const authRequired =
+            parseFeishuAuthRequiredToolResult(text) ??
+            (AUTH_REQUIRED_TEXT_HINT.test(text)
+              ? inferAuthRequiredSessionFromOriginalMessage(params.originalMessageText)
+              : null);
           if (authRequired && params.operatorOpenId && params.chatType) {
             const handled = await startFeishuJwxtLoginFlowForTool({
               cfg,
@@ -506,7 +528,7 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
                 authRequired.requiredSession === "second_class"
                   ? "second_class.get_credit_summary"
                   : "jwxt.get_grades",
-              originalMessageText: params.originalMessageText,
+              originalMessageText: params.originalMessageText ?? text,
               forceLogin: true,
               replyToMessageId: sendReplyToMessageId,
               replyInThread: effectiveReplyInThread,
