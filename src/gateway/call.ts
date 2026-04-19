@@ -36,6 +36,10 @@ import {
   resolveLeastPrivilegeOperatorScopesForMethod,
   type OperatorScope,
 } from "./method-scopes.js";
+import {
+  ConnectErrorDetailCodes,
+  readConnectErrorDetailCode,
+} from "./protocol/connect-error-details.js";
 import { PROTOCOL_VERSION } from "./protocol/index.js";
 export type { GatewayConnectionDetails };
 
@@ -415,6 +419,60 @@ function formatGatewayTimeoutError(
   return `gateway timeout after ${timeoutMs}ms\n${connectionDetails.message}`;
 }
 
+function readConnectErrorPairingRequestId(details: unknown): string | undefined {
+  if (!details || typeof details !== "object" || Array.isArray(details)) {
+    return undefined;
+  }
+  const requestId = (details as { requestId?: unknown }).requestId;
+  if (typeof requestId !== "string") {
+    return undefined;
+  }
+  const normalized = requestId.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function formatGatewayPairingConnectError(params: {
+  requestId?: string;
+  connectionDetails: GatewayConnectionDetails;
+}): string {
+  const actionHint = params.requestId
+    ? `Approve it with: openclaw devices approve ${params.requestId}`
+    : "Run openclaw devices list, then approve the pending request ID.";
+  const pairingLabel = params.requestId
+    ? `pairing required (requestId: ${params.requestId})`
+    : "pairing required";
+  return `${pairingLabel}. ${actionHint}\n${params.connectionDetails.message}`;
+}
+
+function resolveConnectErrorDetails(err: Error): unknown {
+  if (!("details" in err)) {
+    return undefined;
+  }
+  return (err as { details?: unknown }).details;
+}
+
+function shouldSurfacePairingConnectError(err: Error): {
+  shouldSurface: boolean;
+  requestId?: string;
+} {
+  const details = resolveConnectErrorDetails(err);
+  const detailCode = readConnectErrorDetailCode(details);
+  if (detailCode === ConnectErrorDetailCodes.PAIRING_REQUIRED) {
+    return {
+      shouldSurface: true,
+      requestId: readConnectErrorPairingRequestId(details),
+    };
+  }
+  const pairingInMessage = /pairing required/i.test(err.message);
+  if (!pairingInMessage) {
+    return { shouldSurface: false };
+  }
+  return {
+    shouldSurface: true,
+    requestId: readConnectErrorPairingRequestId(details),
+  };
+}
+
 function ensureGatewaySupportsRequiredMethods(params: {
   requiredMethods: string[] | undefined;
   methods: string[] | undefined;
@@ -513,6 +571,26 @@ async function executeGatewayRequestWithScopes<T>(params: {
           client.stop();
           stop(err as Error);
         }
+      },
+      onConnectError: (err) => {
+        if (settled || ignoreClose || !(err instanceof Error)) {
+          return;
+        }
+        const pairingConnectError = shouldSurfacePairingConnectError(err);
+        if (!pairingConnectError.shouldSurface) {
+          return;
+        }
+        ignoreClose = true;
+        client.stop();
+        stop(
+          new Error(
+            formatGatewayPairingConnectError({
+              requestId: pairingConnectError.requestId,
+              connectionDetails: params.connectionDetails,
+            }),
+            { cause: err },
+          ),
+        );
       },
       onClose: (code, reason) => {
         if (settled || ignoreClose) {
