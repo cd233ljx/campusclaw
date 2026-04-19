@@ -441,6 +441,7 @@ function parseFeishuCardActionEventPayload(value: unknown): FeishuCardActionEven
     readString(root.open_chat_id) ??
     contextOpenId ??
     openId;
+  const messageId = readString(root.open_message_id) ?? readString(root.message_id);
   if (!token || !openId || !tag || (!actionValue && !isRecord(actionFormValue)) || !chatId) {
     return null;
   }
@@ -461,6 +462,7 @@ function parseFeishuCardActionEventPayload(value: unknown): FeishuCardActionEven
       open_id: contextOpenId ?? "",
       user_id: contextUserId ?? "",
       chat_id: chatId,
+      ...(messageId ? { message_id: messageId } : {}),
     },
   };
 }

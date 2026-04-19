@@ -5,13 +5,20 @@ import { createFeishuCardInteractionEnvelope } from "./card-interaction.js";
 import { buildFeishuCardButton, buildFeishuCardInteractionContext } from "./card-ux-shared.js";
 import { isRecord } from "./comment-shared.js";
 import { uploadImageFeishu } from "./media.js";
-import { sendCardFeishu, sendMarkdownCardFeishu, sendMessageFeishu } from "./send.js";
+import {
+  editMessageFeishu,
+  sendCardFeishu,
+  sendMarkdownCardFeishu,
+  sendMessageFeishu,
+} from "./send.js";
 
 const DEFAULT_START_PATH = "/channel/feishu/jwxt/login/start";
+const DEFAULT_REFRESH_PATH = "/channel/feishu/jwxt/login/refresh";
 const DEFAULT_SUBMIT_PATH = "/channel/feishu/jwxt/login/submit";
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_CARD_TTL_MS = 10 * 60_000;
 const DEFAULT_TOOL_NAME = "jwxt.get_grades";
+const SECOND_CLASS_TOOL_NAME = "second_class.get_credit_summary";
 
 const DEFAULT_KEYWORDS = [
   "成绩",
@@ -26,7 +33,8 @@ const DEFAULT_KEYWORDS = [
   "gpa",
 ];
 
-const SCHEDULE_HINT = /(课表|课程安排|排课|上课)/;
+const SCHEDULE_HINT =
+  /(课表|课程安排|排课|上课|[这本下]周\s*的?\s*课|今天\s*的?\s*课|明天\s*的?\s*课|后天\s*的?\s*课)/;
 const SECOND_CLASS_HINT = /(第二课堂|素拓|成长记录|综测)/;
 const AMBIGUOUS_CREDIT_HINT = /(学分|毕业|进度|培养方案|credit)/i;
 const JWXT_STRONG_SIGNAL_HINT =
@@ -35,12 +43,14 @@ const COURSE_RECOMMENDATION_HINT =
   /((推荐|安利|建议).{0,8}(课程|选修|公选|通识|体育课?|课)|((课程|选修|公选|通识|体育课?|课).{0,8}(推荐|安利|建议)))/;
 const JWXT_ACTION_VERB_HINT = /(查|看|查询|获取|显示|帮我查|帮我看|看看|show|get|check)/i;
 const JWXT_DOMAIN_HINT =
-  /(教务|成绩单|查分|成绩|分数|绩点|gpa|平均分|均分|挂科|补考|课表|课程安排|排课|上课|考试|schedule|grade|jwxt)/i;
+  /(教务|成绩单|查分|成绩|分数|绩点|gpa|平均分|均分|挂科|补考|课表|课程安排|排课|上课|考试|[这本下]周\s*的?\s*课|今天\s*的?\s*课|明天\s*的?\s*课|后天\s*的?\s*课|schedule|grade|jwxt)/i;
 const JWXT_FALLBACK_INTENT_HINT =
-  /(教务|成绩单|查分|成绩|分数|绩点|gpa|平均分|均分|挂科|补考|课表|课程安排|上课|排课|考试|schedule|grade|jwxt)/i;
+  /(教务|成绩单|查分|成绩|分数|绩点|gpa|平均分|均分|挂科|补考|课表|课程安排|上课|排课|考试|[这本下]周\s*的?\s*课|今天\s*的?\s*课|明天\s*的?\s*课|后天\s*的?\s*课|schedule|grade|jwxt)/i;
 
 export const FEISHU_JWXT_LOGIN_SUBMIT_ACTION = "feishu.jwxt.login.submit";
 export const FEISHU_JWXT_LOGIN_SUBMIT_BUTTON_NAME = "jwxt_login_submit";
+export const FEISHU_JWXT_LOGIN_REFRESH_ACTION = "feishu.jwxt.login.refresh";
+export const FEISHU_JWXT_LOGIN_REFRESH_BUTTON_NAME = "jwxt_login_refresh";
 
 const JWXT_SUBMIT_METADATA_CACHE_TTL_MS = 20 * 60_000;
 const JWXT_SUBMIT_METADATA_CACHE_LIMIT = 256;
@@ -61,6 +71,7 @@ type FeishuJwxtLoginFlowRuntimeConfig = {
   enabled: boolean;
   baseUrl: string;
   startPath: string;
+  refreshPath: string;
   submitPath: string;
   tenantKey: string;
   authHeader?: string;
@@ -81,12 +92,14 @@ type JwxtLoginCardPayload = {
     tenantKey?: string;
   };
   submitLabel: string;
+  refreshLabel: string;
   expireAtMs: number;
 };
 
 type JwxtStartResponse = {
   success?: boolean;
   need_login?: boolean;
+  pass_through?: boolean;
   user_message?: string;
   replay_result?: unknown;
   card_payload?: unknown;
@@ -95,7 +108,15 @@ type JwxtStartResponse = {
 type JwxtSubmitResponse = {
   success?: boolean;
   user_message?: string;
+  resume_via_agent?: boolean;
+  resume_message_text?: string;
   replay_result?: unknown;
+  card_payload?: unknown;
+};
+
+type JwxtRefreshResponse = {
+  success?: boolean;
+  user_message?: string;
   card_payload?: unknown;
 };
 
@@ -107,6 +128,22 @@ type JwxtIntent = {
 type JwxtRequestResult = {
   status: number;
   body: unknown;
+};
+
+export type StartFeishuJwxtLoginFlowForToolParams = {
+  cfg: ClawdbotConfig;
+  accountId?: string;
+  runtime?: RuntimeEnv;
+  operatorOpenId: string;
+  chatId: string;
+  chatType: FeishuCardChatType;
+  toolName: string;
+  originalMessageText?: string;
+  forceLogin?: boolean;
+  replyToMessageId?: string;
+  replyInThread?: boolean;
+  rootId?: string;
+  sessionKey?: string;
 };
 
 function normalizeChatIdForSubmitMetadata(chatId: string): string {
@@ -211,6 +248,18 @@ function trimString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function withResumeProgressHint(message: string): string {
+  const trimmed = message.trim();
+  if (!trimmed) {
+    return "登录成功，正在继续处理你刚才的问题，请稍候 1-2 秒。";
+  }
+  if (/(请稍候|稍等|1\s*[-~]\s*2\s*秒)/.test(trimmed)) {
+    return trimmed;
+  }
+  const withoutTailPunctuation = trimmed.replace(/[。！？!?.]+$/u, "");
+  return `${withoutTailPunctuation}，请稍候 1-2 秒。`;
+}
+
 function normalizePath(path: string | undefined, fallback: string): string {
   const normalized = trimString(path) ?? fallback;
   if (normalized.startsWith("/")) {
@@ -273,6 +322,7 @@ function parseCardPayload(raw: unknown): JwxtLoginCardPayload | null {
   const captcha = isRecord(raw.captcha) ? raw.captcha : null;
   const hidden = isRecord(raw.hidden) ? raw.hidden : null;
   const submit = isRecord(raw.submit) ? raw.submit : null;
+  const refresh = isRecord(raw.refresh) ? raw.refresh : null;
 
   const captchaImageBase64 = trimString(captcha?.image_base64);
   const loginTicket = trimString(hidden?.login_ticket);
@@ -292,6 +342,7 @@ function parseCardPayload(raw: unknown): JwxtLoginCardPayload | null {
       tenantKey: trimString(hidden?.tenant_key),
     },
     submitLabel: trimString(submit?.label) ?? "登录并继续查询",
+    refreshLabel: trimString(refresh?.label) ?? "刷新验证码",
     expireAtMs: parseExpireAtMs(raw.expire_at),
   };
 }
@@ -314,6 +365,7 @@ function parseJwxtLoginFlowConfig(
       enabled: false,
       baseUrl: "",
       startPath: DEFAULT_START_PATH,
+      refreshPath: DEFAULT_REFRESH_PATH,
       submitPath: DEFAULT_SUBMIT_PATH,
       tenantKey: "default",
       authHeader: undefined,
@@ -340,6 +392,7 @@ function parseJwxtLoginFlowConfig(
     enabled: raw.enabled !== false,
     baseUrl,
     startPath: normalizePath(trimString(raw.startPath), DEFAULT_START_PATH),
+    refreshPath: normalizePath(trimString(raw.refreshPath), DEFAULT_REFRESH_PATH),
     submitPath: normalizePath(trimString(raw.submitPath), DEFAULT_SUBMIT_PATH),
     tenantKey: trimString(raw.tenantKey) ?? "default",
     authHeader: trimString(raw.authHeader),
@@ -361,8 +414,8 @@ function resolveJwxtIntent(text: string, config: FeishuJwxtLoginFlowRuntimeConfi
 
   if (SECOND_CLASS_HINT.test(normalized)) {
     return {
-      hasIntent: false,
-      toolName: config.defaultToolName,
+      hasIntent: true,
+      toolName: SECOND_CLASS_TOOL_NAME,
     };
   }
 
@@ -799,11 +852,13 @@ function formatBackendTextReplaySummary(params: {
   data: Record<string, unknown>;
 }): string | undefined {
   const textResult = readReplayText(params.data.textResult);
-  if (!textResult) {
+  const textSummary = readReplayText(params.data.textSummary);
+  const preferredText = textResult || textSummary;
+  if (!preferredText) {
     return undefined;
   }
   // Reuse Flask-produced markdown directly so presentation stays backend-owned.
-  return `已自动继续查询（${params.toolName}）：\n\n${textResult.trim()}`;
+  return `已自动继续查询（${params.toolName}）：\n\n${preferredText.trim()}`;
 }
 
 function formatReplayHighlights(data: Record<string, unknown>): string[] {
@@ -814,7 +869,8 @@ function formatReplayHighlights(data: Record<string, unknown>): string[] {
       key === "structured" ||
       key === "courses" ||
       key === "rawHtml" ||
-      key === "textResult"
+      key === "textResult" ||
+      key === "textSummary"
     ) {
       continue;
     }
@@ -996,6 +1052,33 @@ async function buildFeishuLoginCard(params: {
     ],
   };
 
+  const refreshEnvelope = createFeishuCardInteractionEnvelope({
+    k: "button",
+    a: FEISHU_JWXT_LOGIN_REFRESH_ACTION,
+    m: {
+      login_ticket: cardPayload.hidden.loginTicket,
+      user_id: cardPayload.hidden.userId ?? params.operatorOpenId,
+      channel: cardPayload.hidden.channel ?? "feishu",
+      tenant_key: cardPayload.hidden.tenantKey,
+    },
+    c: context,
+  });
+
+  const refreshButton = {
+    ...buildFeishuCardButton({
+      label: cardPayload.refreshLabel,
+      type: "default",
+      value: refreshEnvelope,
+      name: FEISHU_JWXT_LOGIN_REFRESH_BUTTON_NAME,
+    }),
+    behaviors: [
+      {
+        type: "callback",
+        value: refreshEnvelope,
+      },
+    ],
+  };
+
   return {
     schema: "2.0",
     config: {
@@ -1061,6 +1144,11 @@ async function buildFeishuLoginCard(params: {
                 {
                   tag: "column",
                   width: "auto",
+                  elements: [refreshButton],
+                },
+                {
+                  tag: "column",
+                  width: "auto",
                   elements: [submitButton],
                 },
               ],
@@ -1074,6 +1162,48 @@ async function buildFeishuLoginCard(params: {
       ],
     },
   };
+}
+
+async function upsertFeishuLoginCard(params: {
+  cfg: ClawdbotConfig;
+  accountId?: string;
+  operatorOpenId: string;
+  chatId: string;
+  chatType: FeishuCardChatType;
+  sessionKey?: string;
+  messageId?: string;
+  cardPayload: JwxtLoginCardPayload;
+  runtime?: RuntimeEnv;
+}): Promise<"edited" | "sent" | "failed"> {
+  const card = await buildFeishuLoginCard(params);
+  if (!card) {
+    return "failed";
+  }
+
+  const messageId = trimString(params.messageId);
+  if (messageId) {
+    try {
+      await editMessageFeishu({
+        cfg: params.cfg,
+        messageId,
+        card,
+        accountId: params.accountId,
+      });
+      return "edited";
+    } catch (error) {
+      params.runtime?.error?.(
+        `feishu[${params.accountId ?? "default"}]: jwxt login card edit failed: ${String(error)}`,
+      );
+    }
+  }
+
+  await sendCardFeishu({
+    cfg: params.cfg,
+    to: `chat:${params.chatId}`,
+    card,
+    accountId: params.accountId,
+  });
+  return "sent";
 }
 
 export async function maybeStartFeishuJwxtLoginFlow(params: {
@@ -1104,6 +1234,29 @@ export async function maybeStartFeishuJwxtLoginFlow(params: {
     return false;
   }
 
+  return startFeishuJwxtLoginFlowWithResolvedConfig({
+    cfg: params.cfg,
+    accountId: params.accountId,
+    runtime: params.runtime,
+    operatorOpenId: params.operatorOpenId,
+    chatId: params.chatId,
+    chatType: params.chatType,
+    toolName: intent.toolName,
+    originalMessageText: messageText,
+    replyToMessageId: params.replyToMessageId,
+    replyInThread: params.replyInThread,
+    rootId: params.rootId,
+    sessionKey: params.sessionKey,
+    flowConfig,
+  });
+}
+
+async function startFeishuJwxtLoginFlowWithResolvedConfig(
+  params: StartFeishuJwxtLoginFlowForToolParams & {
+    flowConfig: FeishuJwxtLoginFlowRuntimeConfig;
+  },
+): Promise<boolean> {
+  const flowConfig = params.flowConfig;
   let startResponse: JwxtRequestResult;
   try {
     startResponse = await postJson({
@@ -1111,10 +1264,14 @@ export async function maybeStartFeishuJwxtLoginFlow(params: {
       config: flowConfig,
       body: {
         user_id: params.operatorOpenId,
-        tool_name: intent.toolName,
+        tool_name: params.toolName,
         arguments: {},
+        ...(trimString(params.originalMessageText)
+          ? { message_text: trimString(params.originalMessageText) }
+          : {}),
         channel: "feishu",
         tenant_key: flowConfig.tenantKey,
+        ...(params.forceLogin === true ? { force_login: true } : {}),
       },
     });
   } catch (error) {
@@ -1127,6 +1284,9 @@ export async function maybeStartFeishuJwxtLoginFlow(params: {
   const payload = isRecord(startResponse.body)
     ? (startResponse.body as JwxtStartResponse)
     : ({} as JwxtStartResponse);
+  if (payload.pass_through === true) {
+    return false;
+  }
   const needLogin = payload.need_login === true;
 
   if (!needLogin) {
@@ -1235,6 +1395,26 @@ export async function maybeStartFeishuJwxtLoginFlow(params: {
   return true;
 }
 
+export async function startFeishuJwxtLoginFlowForTool(
+  params: StartFeishuJwxtLoginFlowForToolParams,
+): Promise<boolean> {
+  const flowConfig = parseJwxtLoginFlowConfig(params.cfg, params.accountId);
+  if (!flowConfig || !flowConfig.enabled || !flowConfig.baseUrl) {
+    return false;
+  }
+
+  const toolName = trimString(params.toolName);
+  if (!toolName) {
+    return false;
+  }
+
+  return startFeishuJwxtLoginFlowWithResolvedConfig({
+    ...params,
+    toolName,
+    flowConfig,
+  });
+}
+
 function readFormScalar(value: unknown): string {
   const direct = trimString(value);
   if (direct) {
@@ -1310,11 +1490,13 @@ export async function handleFeishuJwxtLoginSubmit(params: {
     };
     context: {
       chat_id: string;
+      message_id?: string;
     };
   };
   envelopeMetadata?: Record<string, unknown>;
   chatType?: FeishuCardChatType;
   sessionKey?: string;
+  onResumeMessage?: (messageText: string) => Promise<void>;
 }): Promise<boolean> {
   const flowConfig = parseJwxtLoginFlowConfig(params.cfg, params.accountId);
   if (!flowConfig || !flowConfig.enabled || !flowConfig.baseUrl) {
@@ -1402,7 +1584,22 @@ export async function handleFeishuJwxtLoginSubmit(params: {
     : ({} as JwxtSubmitResponse);
 
   if (payload.success === true) {
+    const resumeMessageText = trimString(payload.resume_message_text);
     const userMessage = trimString(payload.user_message) ?? "登录成功，正在继续查询。";
+    if (resumeMessageText) {
+      const resumeNotice = withResumeProgressHint(userMessage);
+      await sendMessageFeishu({
+        cfg: params.cfg,
+        to: `chat:${params.event.context.chat_id}`,
+        text: resumeNotice,
+        accountId: params.accountId,
+      });
+      if (params.onResumeMessage) {
+        await params.onResumeMessage(resumeMessageText);
+        return true;
+      }
+      return true;
+    }
     const replayTableCard = buildReplayTableCardFromResult({
       baseText: userMessage,
       replayResult: payload.replay_result,
@@ -1429,25 +1626,20 @@ export async function handleFeishuJwxtLoginSubmit(params: {
 
   const refreshedCardPayload = parseCardPayload(payload.card_payload);
   if (refreshedCardPayload) {
-    const refreshedCard = await buildFeishuLoginCard({
+    const refreshedCard = await upsertFeishuLoginCard({
       cfg: params.cfg,
       accountId: params.accountId,
       operatorOpenId: params.event.operator.open_id,
       chatId: params.event.context.chat_id,
       chatType: params.chatType ?? "group",
       sessionKey: params.sessionKey,
+      messageId: params.event.context.message_id,
       cardPayload: refreshedCardPayload,
       runtime: params.runtime,
     });
-    if (refreshedCard) {
-      await sendCardFeishu({
-        cfg: params.cfg,
-        to: `chat:${params.event.context.chat_id}`,
-        card: refreshedCard,
-        accountId: params.accountId,
-      });
+    if (refreshedCard !== "failed") {
       const hint = trimString(payload.user_message);
-      if (hint) {
+      if (hint && refreshedCard === "sent") {
         await sendMessageFeishu({
           cfg: params.cfg,
           to: `chat:${params.event.context.chat_id}`,
@@ -1463,6 +1655,95 @@ export async function handleFeishuJwxtLoginSubmit(params: {
     cfg: params.cfg,
     to: `chat:${params.event.context.chat_id}`,
     text: trimString(payload.user_message) ?? "登录失败，请重新尝试。",
+    accountId: params.accountId,
+  });
+  return true;
+}
+
+export async function handleFeishuJwxtLoginRefresh(params: {
+  cfg: ClawdbotConfig;
+  accountId?: string;
+  runtime?: RuntimeEnv;
+  event: {
+    operator: {
+      open_id: string;
+    };
+    context: {
+      chat_id: string;
+      message_id?: string;
+    };
+  };
+  envelopeMetadata?: Record<string, unknown>;
+  chatType?: FeishuCardChatType;
+  sessionKey?: string;
+}): Promise<boolean> {
+  const flowConfig = parseJwxtLoginFlowConfig(params.cfg, params.accountId);
+  if (!flowConfig || !flowConfig.enabled || !flowConfig.baseUrl) {
+    return false;
+  }
+
+  const metadata = params.envelopeMetadata ?? {};
+  const loginTicket = trimString(metadata.login_ticket);
+  if (!loginTicket) {
+    await sendMessageFeishu({
+      cfg: params.cfg,
+      to: `chat:${params.event.context.chat_id}`,
+      text: "登录票据已失效，请重新触发一次查询。",
+      accountId: params.accountId,
+    });
+    return true;
+  }
+
+  let refreshResponse: JwxtRequestResult;
+  try {
+    refreshResponse = await postJson({
+      url: buildRequestUrl(flowConfig.baseUrl, flowConfig.refreshPath),
+      config: flowConfig,
+      body: {
+        login_ticket: loginTicket,
+        user_id: trimString(metadata.user_id) ?? params.event.operator.open_id,
+        channel: trimString(metadata.channel) ?? "feishu",
+        tenant_key: trimString(metadata.tenant_key) ?? flowConfig.tenantKey,
+      },
+    });
+  } catch (error) {
+    params.runtime?.error?.(
+      `feishu[${params.accountId ?? "default"}]: jwxt login refresh request failed: ${String(error)}`,
+    );
+    await sendMessageFeishu({
+      cfg: params.cfg,
+      to: `chat:${params.event.context.chat_id}`,
+      text: "刷新验证码失败，请稍后重试。",
+      accountId: params.accountId,
+    });
+    return true;
+  }
+
+  const payload = isRecord(refreshResponse.body)
+    ? (refreshResponse.body as JwxtRefreshResponse)
+    : ({} as JwxtRefreshResponse);
+  const refreshedCardPayload = parseCardPayload(payload.card_payload);
+  if (refreshedCardPayload) {
+    const refreshedCard = await upsertFeishuLoginCard({
+      cfg: params.cfg,
+      accountId: params.accountId,
+      operatorOpenId: params.event.operator.open_id,
+      chatId: params.event.context.chat_id,
+      chatType: params.chatType ?? "group",
+      sessionKey: params.sessionKey,
+      messageId: params.event.context.message_id,
+      cardPayload: refreshedCardPayload,
+      runtime: params.runtime,
+    });
+    if (refreshedCard !== "failed") {
+      return true;
+    }
+  }
+
+  await sendMessageFeishu({
+    cfg: params.cfg,
+    to: `chat:${params.event.context.chat_id}`,
+    text: trimString(payload.user_message) ?? "刷新验证码失败，请重新尝试。",
     accountId: params.accountId,
   });
   return true;

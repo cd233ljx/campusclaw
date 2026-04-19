@@ -113,6 +113,7 @@ const FeishuJwxtLoginFlowSchema = z
     enabled: z.boolean().optional(),
     baseUrl: z.string().url().optional(),
     startPath: z.string().optional(),
+    refreshPath: z.string().optional(),
     submitPath: z.string().optional(),
     tenantKey: z.string().optional(),
     authHeader: z.string().optional(),

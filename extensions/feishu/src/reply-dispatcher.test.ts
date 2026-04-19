@@ -19,6 +19,7 @@ const resolveReceiveIdTypeMock = vi.hoisted(() => vi.fn());
 const createReplyDispatcherWithTypingMock = vi.hoisted(() => vi.fn());
 const addTypingIndicatorMock = vi.hoisted(() => vi.fn(async () => ({ messageId: "om_msg" })));
 const removeTypingIndicatorMock = vi.hoisted(() => vi.fn(async () => {}));
+const startFeishuJwxtLoginFlowForToolMock = vi.hoisted(() => vi.fn());
 const streamingInstances = vi.hoisted((): StreamingSessionStub[] => []);
 
 function mergeStreamingText(
@@ -85,6 +86,9 @@ vi.mock("./streaming-card.js", () => {
     },
   };
 });
+vi.mock("./jwxt-login-flow.js", () => ({
+  startFeishuJwxtLoginFlowForTool: startFeishuJwxtLoginFlowForToolMock,
+}));
 
 import { createFeishuReplyDispatcher } from "./reply-dispatcher.js";
 
@@ -96,6 +100,7 @@ describe("createFeishuReplyDispatcher streaming behavior", () => {
     streamingInstances.length = 0;
     sendMediaFeishuMock.mockResolvedValue(undefined);
     sendStructuredCardFeishuMock.mockResolvedValue(undefined);
+    startFeishuJwxtLoginFlowForToolMock.mockResolvedValue(false);
 
     resolveFeishuAccountMock.mockReturnValue({
       accountId: "main",
@@ -442,6 +447,157 @@ describe("createFeishuReplyDispatcher streaming behavior", () => {
     );
     expect(sendMessageFeishuMock).not.toHaveBeenCalled();
     expect(sendMarkdownCardFeishuMock).not.toHaveBeenCalled();
+  });
+
+  it("starts jwxt login flow when tool result reports authRequired jwxt", async () => {
+    startFeishuJwxtLoginFlowForToolMock.mockResolvedValueOnce(true);
+    const { options } = createDispatcherHarness({
+      operatorOpenId: "ou_user",
+      chatType: "group",
+      sessionKey: "agent:demo:feishu:group:oc_chat",
+      replyToMessageId: "om_parent",
+      replyInThread: true,
+    });
+
+    await options.deliver(
+      {
+        text: JSON.stringify({
+          error: "登录状态已过期，请重新登录",
+          errorCode: "SESSION_EXPIRED",
+          requiresLogin: true,
+          requiredSession: "jwxt",
+          authRequired: true,
+        }),
+      },
+      { kind: "tool" },
+    );
+
+    expect(startFeishuJwxtLoginFlowForToolMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorOpenId: "ou_user",
+        chatId: "oc_chat",
+        chatType: "group",
+        sessionKey: "agent:demo:feishu:group:oc_chat",
+        toolName: "jwxt.get_grades",
+        replyToMessageId: "om_parent",
+        replyInThread: true,
+      }),
+    );
+    expect(sendMessageFeishuMock).not.toHaveBeenCalled();
+    expect(sendStructuredCardFeishuMock).not.toHaveBeenCalled();
+  });
+
+  it("starts second-class login flow when tool result reports authRequired second_class", async () => {
+    startFeishuJwxtLoginFlowForToolMock.mockResolvedValueOnce(true);
+    const { options } = createDispatcherHarness({
+      operatorOpenId: "ou_user",
+      chatType: "p2p",
+    });
+
+    await options.deliver(
+      {
+        text: JSON.stringify({
+          error: "第二课堂登录已失效，请重新登录",
+          errorCode: "UNAUTHORIZED",
+          requiresLogin: true,
+          requiredSession: "second_class",
+          authRequired: true,
+        }),
+      },
+      { kind: "tool" },
+    );
+
+    expect(startFeishuJwxtLoginFlowForToolMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorOpenId: "ou_user",
+        chatType: "p2p",
+        toolName: "second_class.get_credit_summary",
+      }),
+    );
+    expect(sendMessageFeishuMock).not.toHaveBeenCalled();
+  });
+
+  it("does not start login flow for non-auth tool json", async () => {
+    const { options } = createDispatcherHarness({
+      operatorOpenId: "ou_user",
+      chatType: "group",
+    });
+
+    await options.deliver(
+      {
+        text: JSON.stringify({
+          error: "上游超时",
+          errorCode: "UPSTREAM_TIMEOUT",
+          authRequired: false,
+        }),
+      },
+      { kind: "tool" },
+    );
+
+    expect(startFeishuJwxtLoginFlowForToolMock).not.toHaveBeenCalled();
+    expect(sendMessageFeishuMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not start login flow for non-json tool text", async () => {
+    const { options } = createDispatcherHarness({
+      operatorOpenId: "ou_user",
+      chatType: "group",
+    });
+
+    await options.deliver({ text: "请先登录后再查询" }, { kind: "tool" });
+
+    expect(startFeishuJwxtLoginFlowForToolMock).not.toHaveBeenCalled();
+    expect(sendMessageFeishuMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageFeishuMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "请先登录后再查询",
+      }),
+    );
+  });
+
+  it("starts jwxt login flow for plain MCP auth error text", async () => {
+    startFeishuJwxtLoginFlowForToolMock.mockResolvedValueOnce(true);
+    const { options } = createDispatcherHarness({
+      operatorOpenId: "ou_user",
+      chatType: "group",
+      sessionKey: "agent:demo:feishu:group:oc_chat",
+      replyToMessageId: "om_parent",
+      replyInThread: true,
+    });
+
+    await options.deliver({ text: "错误: 请先登录教务系统" }, { kind: "tool" });
+
+    expect(startFeishuJwxtLoginFlowForToolMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorOpenId: "ou_user",
+        chatId: "oc_chat",
+        chatType: "group",
+        sessionKey: "agent:demo:feishu:group:oc_chat",
+        toolName: "jwxt.get_grades",
+        replyToMessageId: "om_parent",
+        replyInThread: true,
+      }),
+    );
+    expect(sendMessageFeishuMock).not.toHaveBeenCalled();
+  });
+
+  it("starts second-class login flow for plain auth error text", async () => {
+    startFeishuJwxtLoginFlowForToolMock.mockResolvedValueOnce(true);
+    const { options } = createDispatcherHarness({
+      operatorOpenId: "ou_user",
+      chatType: "p2p",
+    });
+
+    await options.deliver({ text: "错误: 请先登录第二课堂系统" }, { kind: "tool" });
+
+    expect(startFeishuJwxtLoginFlowForToolMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operatorOpenId: "ou_user",
+        chatType: "p2p",
+        toolName: "second_class.get_credit_summary",
+      }),
+    );
+    expect(sendMessageFeishuMock).not.toHaveBeenCalled();
   });
 
   it("falls back to legacy mediaUrl when mediaUrls is an empty array", async () => {

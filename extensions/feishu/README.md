@@ -14,8 +14,9 @@ The chat-in-card JWXT login flow is implemented in:
 Behavior summary:
 
 1. On JWXT-like intent, OpenClaw calls `start` and can send a captcha card.
-2. On card submit (`feishu.jwxt.login.submit`), OpenClaw calls `submit`.
-3. On successful submit, OpenClaw posts the replay summary back to the same chat.
+2. On card refresh (`feishu.jwxt.login.refresh`), OpenClaw calls `refresh` and sends a new captcha card.
+3. On card submit (`feishu.jwxt.login.submit`), OpenClaw calls `submit`.
+4. On successful submit, OpenClaw posts the replay summary back to the same chat.
 
 ## Config
 
@@ -27,6 +28,7 @@ Add this to `channels.feishu`:
     "enabled": true,
     "baseUrl": "http://127.0.0.1:5001",
     "startPath": "/channel/feishu/jwxt/login/start",
+    "refreshPath": "/channel/feishu/jwxt/login/refresh",
     "submitPath": "/channel/feishu/jwxt/login/submit",
     "tenantKey": "default",
     "authHeaderName": "Authorization",

@@ -7,6 +7,7 @@ import {
 } from "openclaw/plugin-sdk/reply-payload";
 import { resolveFeishuRuntimeAccount } from "./accounts.js";
 import { createFeishuClient } from "./client.js";
+import { startFeishuJwxtLoginFlowForTool } from "./jwxt-login-flow.js";
 import { sendMediaFeishu } from "./media.js";
 import type { MentionTarget } from "./mention-target.types.js";
 import { buildMentionedCardContent } from "./mention.js";
@@ -77,6 +78,10 @@ export type CreateFeishuReplyDispatcherParams = {
   agentId: string;
   runtime: RuntimeEnv;
   chatId: string;
+  operatorOpenId?: string;
+  chatType?: "p2p" | "group";
+  sessionKey?: string;
+  originalMessageText?: string;
   allowReasoningPreview?: boolean;
   replyToMessageId?: string;
   /** When true, preserve typing indicator on reply target but send messages without reply metadata */
@@ -92,6 +97,108 @@ export type CreateFeishuReplyDispatcherParams = {
    *  indicators on old/replayed messages after context compaction (#30418). */
   messageCreateTimeMs?: number;
 };
+
+type FeishuAuthRequiredToolResult = {
+  requiredSession: "jwxt" | "second_class";
+};
+
+const AUTH_REQUIRED_ERROR_CODES = new Set(["UNAUTHORIZED", "SESSION_EXPIRED"]);
+const AUTH_REQUIRED_TEXT_HINT =
+  /(session[_\s-]?expired|unauthorized|auth\s*required|requires\s*login|请先登录|重新登录|登录状态已过期|会话.*过期)/i;
+const JWXT_AUTH_DOMAIN_HINT = /(jwxt|教务|成绩|查分|课表|排课|上课)/i;
+const SECOND_CLASS_AUTH_DOMAIN_HINT = /(second[_\s-]?class|第二课堂|素拓|成长记录)/i;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function parseAuthRequiredSessionFromRecord(
+  parsed: Record<string, unknown>,
+): FeishuAuthRequiredToolResult | null {
+  const requiredSession = parsed.requiredSession;
+  const authRequiredByFlag = parsed.authRequired === true || parsed.requiresLogin === true;
+  const errorCode =
+    typeof parsed.errorCode === "string" ? parsed.errorCode.trim().toUpperCase() : undefined;
+  const authRequiredByCode = Boolean(errorCode && AUTH_REQUIRED_ERROR_CODES.has(errorCode));
+  const authRequired = authRequiredByFlag || authRequiredByCode;
+  if (!authRequired) {
+    return null;
+  }
+
+  if (requiredSession === "jwxt" || requiredSession === "second_class") {
+    return { requiredSession };
+  }
+
+  const mergedMessage = [parsed.error, parsed.userMessage, parsed.message]
+    .filter((entry): entry is string => typeof entry === "string")
+    .join("\n");
+  if (SECOND_CLASS_AUTH_DOMAIN_HINT.test(mergedMessage)) {
+    return { requiredSession: "second_class" };
+  }
+  if (JWXT_AUTH_DOMAIN_HINT.test(mergedMessage)) {
+    return { requiredSession: "jwxt" };
+  }
+
+  return null;
+}
+
+function parseAuthRequiredSessionFromJsonText(text: string): FeishuAuthRequiredToolResult | null {
+  const candidates: string[] = [text];
+  for (const match of text.matchAll(/```(?:json)?\s*([\s\S]*?)```/giu)) {
+    const candidate = match[1]?.trim();
+    if (candidate) {
+      candidates.push(candidate);
+    }
+  }
+
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(text.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (!isRecord(parsed)) {
+        continue;
+      }
+      const resolved = parseAuthRequiredSessionFromRecord(parsed);
+      if (resolved) {
+        return resolved;
+      }
+    } catch {
+      // Keep scanning alternate candidates (fenced block, embedded JSON, etc).
+    }
+  }
+
+  return null;
+}
+
+function parseFeishuAuthRequiredToolResult(text: string): FeishuAuthRequiredToolResult | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsedJson = parseAuthRequiredSessionFromJsonText(trimmed);
+  if (parsedJson) {
+    return parsedJson;
+  }
+
+  if (!AUTH_REQUIRED_TEXT_HINT.test(trimmed)) {
+    return null;
+  }
+
+  if (SECOND_CLASS_AUTH_DOMAIN_HINT.test(trimmed)) {
+    return { requiredSession: "second_class" };
+  }
+  if (JWXT_AUTH_DOMAIN_HINT.test(trimmed)) {
+    return { requiredSession: "jwxt" };
+  }
+
+  return null;
+}
 
 export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherParams) {
   const core = getFeishuRuntime();
@@ -383,6 +490,34 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
 
         if (!shouldDeliverText && !hasMedia) {
           return;
+        }
+
+        if (info?.kind === "tool" && shouldDeliverText) {
+          const authRequired = parseFeishuAuthRequiredToolResult(text);
+          if (authRequired && params.operatorOpenId && params.chatType) {
+            const handled = await startFeishuJwxtLoginFlowForTool({
+              cfg,
+              accountId,
+              runtime: params.runtime,
+              operatorOpenId: params.operatorOpenId,
+              chatId,
+              chatType: params.chatType,
+              toolName:
+                authRequired.requiredSession === "second_class"
+                  ? "second_class.get_credit_summary"
+                  : "jwxt.get_grades",
+              originalMessageText: params.originalMessageText,
+              forceLogin: true,
+              replyToMessageId: sendReplyToMessageId,
+              replyInThread: effectiveReplyInThread,
+              rootId,
+              sessionKey: params.sessionKey,
+            });
+
+            if (handled) {
+              return;
+            }
+          }
         }
 
         if (shouldDeliverText) {

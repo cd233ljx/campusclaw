@@ -37,8 +37,10 @@ vi.mock("./bot.js", () => ({
 
 const sendCardFeishuMock = vi.hoisted(() => vi.fn());
 const sendMessageFeishuMock = vi.hoisted(() => vi.fn());
+const editMessageFeishuMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./send.js", () => ({
+  editMessageFeishu: editMessageFeishuMock,
   sendCardFeishu: sendCardFeishuMock,
   sendMessageFeishu: sendMessageFeishuMock,
 }));

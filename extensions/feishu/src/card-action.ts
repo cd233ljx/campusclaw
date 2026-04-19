@@ -9,8 +9,10 @@ import {
   FEISHU_APPROVAL_REQUEST_ACTION,
 } from "./card-ux-approval.js";
 import {
+  FEISHU_JWXT_LOGIN_REFRESH_ACTION,
   FEISHU_JWXT_LOGIN_SUBMIT_BUTTON_NAME,
   FEISHU_JWXT_LOGIN_SUBMIT_ACTION,
+  handleFeishuJwxtLoginRefresh,
   handleFeishuJwxtLoginSubmit,
   resolveFeishuJwxtLoginSubmitMetadataFallback,
 } from "./jwxt-login-flow.js";
@@ -38,6 +40,7 @@ export type FeishuCardActionEvent = {
     open_id: string;
     user_id: string;
     chat_id: string;
+    message_id?: string;
   };
 };
 
@@ -374,6 +377,30 @@ export async function handleFeishuCardAction(params: {
           envelopeMetadata: envelope.m,
           chatType: envelope.c?.t ?? (event.context.chat_id ? "group" : "p2p"),
           sessionKey: envelope.c?.s,
+          onResumeMessage: async (messageText) =>
+            await dispatchSyntheticCommand({
+              cfg,
+              event,
+              command: messageText,
+              botOpenId: params.botOpenId,
+              runtime,
+              accountId,
+              chatType: envelope.c?.t ?? (event.context.chat_id ? "group" : "p2p"),
+            }),
+        });
+        completeFeishuCardActionToken({ token: event.token, accountId: account.accountId });
+        return;
+      }
+
+      if (envelope.a === FEISHU_JWXT_LOGIN_REFRESH_ACTION) {
+        await handleFeishuJwxtLoginRefresh({
+          cfg,
+          accountId,
+          runtime,
+          event,
+          envelopeMetadata: envelope.m ?? {},
+          chatType: envelope.c?.t,
+          sessionKey: envelope.c?.s,
         });
         completeFeishuCardActionToken({ token: event.token, accountId: account.accountId });
         return;
@@ -453,6 +480,16 @@ export async function handleFeishuCardAction(params: {
         },
         envelopeMetadata: fallbackMetadata,
         chatType: event.context.chat_id ? "group" : "p2p",
+        onResumeMessage: async (messageText) =>
+          await dispatchSyntheticCommand({
+            cfg,
+            event,
+            command: messageText,
+            botOpenId: params.botOpenId,
+            runtime,
+            accountId,
+            chatType: event.context.chat_id ? "group" : "p2p",
+          }),
       });
       if (handled) {
         completeFeishuCardActionToken({ token: event.token, accountId: account.accountId });

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClawdbotConfig } from "../runtime-api.js";
 
 const uploadImageFeishuMock = vi.hoisted(() => vi.fn());
+const editMessageFeishuMock = vi.hoisted(() => vi.fn());
 const sendCardFeishuMock = vi.hoisted(() => vi.fn());
 const sendMessageFeishuMock = vi.hoisted(() => vi.fn());
 const sendMarkdownCardFeishuMock = vi.hoisted(() => vi.fn());
@@ -11,6 +12,7 @@ vi.mock("./media.js", () => ({
 }));
 
 vi.mock("./send.js", () => ({
+  editMessageFeishu: editMessageFeishuMock,
   sendCardFeishu: sendCardFeishuMock,
   sendMessageFeishu: sendMessageFeishuMock,
   sendMarkdownCardFeishu: sendMarkdownCardFeishuMock,
@@ -32,6 +34,7 @@ function buildConfig(baseUrl: string): ClawdbotConfig {
           enabled: true,
           baseUrl,
           startPath: "/channel/feishu/jwxt/login/start",
+          refreshPath: "/channel/feishu/jwxt/login/refresh",
           submitPath: "/channel/feishu/jwxt/login/submit",
           tenantKey: "default",
           authHeaderName: "Authorization",
@@ -45,38 +48,39 @@ function buildConfig(baseUrl: string): ClawdbotConfig {
   } as unknown as ClawdbotConfig;
 }
 
-function findCardNodeByTag(node: unknown, tag: string): Record<string, unknown> | null {
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      const found = findCardNodeByTag(item, tag);
-      if (found) {
-        return found;
+function findAllCardNodesByTag(node: unknown, tag: string): Record<string, unknown>[] {
+  const results: Record<string, unknown>[] = [];
+
+  function visit(current: unknown) {
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        visit(item);
       }
+      return;
     }
-    return null;
-  }
 
-  if (typeof node !== "object" || node === null) {
-    return null;
-  }
+    if (typeof current !== "object" || current === null) {
+      return;
+    }
 
-  const record = node as Record<string, unknown>;
-  if (record.tag === tag) {
-    return record;
-  }
+    const record = current as Record<string, unknown>;
+    if (record.tag === tag) {
+      results.push(record);
+    }
 
-  for (const value of Object.values(record)) {
-    const found = findCardNodeByTag(value, tag);
-    if (found) {
-      return found;
+    for (const value of Object.values(record)) {
+      visit(value);
     }
   }
 
-  return null;
+  visit(node);
+  return results;
 }
 
 function getSubmitEnvelopeMetadata(card: unknown): Record<string, unknown> {
-  const submitButton = findCardNodeByTag(card, "button");
+  const submitButton =
+    findAllCardNodesByTag(card, "button").find((button) => button.name === "jwxt_login_submit") ??
+    null;
   const directEnvelope = submitButton?.value as { m?: Record<string, unknown> } | undefined;
   const behaviorEnvelope =
     (
@@ -94,6 +98,10 @@ describe("Feishu JWXT login flow e2e", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     uploadImageFeishuMock.mockResolvedValue({ imageKey: "img_e2e_captcha" });
+    editMessageFeishuMock.mockResolvedValue({
+      messageId: "om_card_e2e",
+      contentType: "interactive",
+    });
     sendCardFeishuMock.mockResolvedValue({ messageId: "om_card_e2e", chatId: "oc_group_e2e" });
     sendMessageFeishuMock.mockResolvedValue({
       messageId: "om_msg_e2e",
@@ -129,6 +137,8 @@ describe("Feishu JWXT login flow e2e", () => {
 
     console.log("[E2E][start][metadata]", JSON.stringify(metadata));
 
+    const onResumeMessage = vi.fn(async () => {});
+
     await handleFeishuJwxtLoginSubmit({
       cfg,
       accountId: "default",
@@ -149,16 +159,9 @@ describe("Feishu JWXT login flow e2e", () => {
       },
       envelopeMetadata: metadata,
       chatType: "group",
+      onResumeMessage,
     });
 
-    expect(sendCardFeishuMock).toHaveBeenCalledTimes(2);
-    const replayCard = sendCardFeishuMock.mock.calls.at(-1)?.[0]?.card;
-    const tableNode = findCardNodeByTag(replayCard, "table");
-    const rows = Array.isArray(tableNode?.rows)
-      ? (tableNode.rows as Array<Record<string, unknown>>)
-      : [];
-
-    expect(rows.length).toBeGreaterThan(0);
-    console.log("[E2E][submit][reply_card_rows]", rows.length);
+    expect(onResumeMessage).toHaveBeenCalledTimes(1);
   });
 });
