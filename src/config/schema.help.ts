@@ -206,6 +206,22 @@ export const FIELD_HELP: Record<string, string> = {
     "Default max characters kept for a single live tool result before truncation. This affects both persisted live tool-result writes and overflow-recovery truncation heuristics.",
   "agents.defaults.contextLimits.postCompactionMaxChars":
     "Default max characters retained from AGENTS.md during post-compaction context refresh injection. Lower this to make compaction recovery cheaper, or raise it for agents that depend on longer startup guidance.",
+  "agents.defaults.contextHygiene":
+    "Low-interruption long-session reminders. When a conversation is already large and the next user message appears to switch topics, OpenClaw can append a brief Chinese suggestion to use /new or /clear for a fresh topic.",
+  "agents.defaults.contextHygiene.enabled":
+    "Enable context hygiene reminders. Disable to keep the feature completely silent.",
+  "agents.defaults.contextHygiene.warnThresholdRatio":
+    "Context utilization ratio where reminders become eligible. The reminder still requires enough turns, cooldown expiry, and usually a topic shift.",
+  "agents.defaults.contextHygiene.cooldownTurns":
+    "Minimum user turns to wait after a context hygiene reminder before another one can be shown in the same session.",
+  "agents.defaults.contextHygiene.minTurnsBeforeWarn":
+    "Minimum user turns before context hygiene reminders can be shown.",
+  "agents.defaults.contextHygiene.onlyWhenTopicShift":
+    "When true, remind only if the latest user message appears to move away from the recent task topic.",
+  "agents.defaults.contextHygiene.preferInternalSummarization":
+    "When true, suppress the user-facing reminder on turns where internal compaction already handled the long context.",
+  "agents.defaults.contextHygiene.demoMode":
+    "Disable context hygiene reminders for demos so long-running presentations keep continuity without extra product notices.",
   "agents.list":
     "Explicit list of configured agents with IDs and optional overrides for model, tools, identity, and workspace. Keep IDs stable over time so bindings, approvals, and session routing remain deterministic.",
   "agents.list[].skillsLimits":

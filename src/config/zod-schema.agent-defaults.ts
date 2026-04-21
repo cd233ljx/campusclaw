@@ -120,6 +120,18 @@ export const AgentDefaultsSchema = z
       })
       .strict()
       .optional(),
+    contextHygiene: z
+      .object({
+        enabled: z.boolean().optional(),
+        warnThresholdRatio: z.number().min(0.1).max(0.99).optional(),
+        cooldownTurns: z.number().int().nonnegative().optional(),
+        minTurnsBeforeWarn: z.number().int().nonnegative().optional(),
+        onlyWhenTopicShift: z.boolean().optional(),
+        preferInternalSummarization: z.boolean().optional(),
+        demoMode: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
     llm: z
       .object({
         idleTimeoutSeconds: z

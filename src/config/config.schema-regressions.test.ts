@@ -209,6 +209,26 @@ describe("config schema regressions", () => {
     expect(res.ok).toBe(true);
   });
 
+  it("accepts agents.defaults.contextHygiene overrides", () => {
+    const res = validateConfigObject({
+      agents: {
+        defaults: {
+          contextHygiene: {
+            enabled: true,
+            warnThresholdRatio: 0.82,
+            cooldownTurns: 10,
+            minTurnsBeforeWarn: 8,
+            onlyWhenTopicShift: true,
+            preferInternalSummarization: true,
+            demoMode: false,
+          },
+        },
+      },
+    });
+
+    expect(res.ok).toBe(true);
+  });
+
   it("accepts safe iMessage remoteHost", () => {
     const res = IMessageConfigSchema.safeParse({
       remoteHost: "bot@gateway-host",

@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { hasConfiguredModelFallbacks, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import { resolveContextTokensForModel } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
@@ -14,7 +15,10 @@ import {
   updateSessionStoreEntry,
 } from "../../config/sessions.js";
 import type { TypingMode } from "../../config/types.js";
-import { resolveSessionTranscriptCandidates } from "../../gateway/session-utils.fs.js";
+import {
+  readSessionMessages,
+  resolveSessionTranscriptCandidates,
+} from "../../gateway/session-utils.fs.js";
 import { emitAgentEvent } from "../../infra/agent-events.js";
 import { emitDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
@@ -54,6 +58,7 @@ import { appendUsageLine, formatResponseUsageLine } from "./agent-runner-usage-l
 import { resolveQueuedReplyExecutionConfig } from "./agent-runner-utils.js";
 import { createAudioAsVoiceBuffer, createBlockReplyPipeline } from "./block-reply-pipeline.js";
 import { resolveEffectiveBlockStreamingConfig } from "./block-streaming.js";
+import { evaluateContextHygieneReminder } from "./context-hygiene.js";
 import { createFollowupRunner } from "./followup-runner.js";
 import { resolveOriginMessageProvider, resolveOriginMessageTo } from "./origin-routing.js";
 import { readPostCompactionContext } from "./post-compaction-context.js";
@@ -1088,6 +1093,7 @@ export async function runReplyAgent(params: {
   let runFollowupTurn = queuedRunFollowupTurn;
   const prePreflightCompactionCount = activeSessionEntry?.compactionCount ?? 0;
   let preflightCompactionApplied = false;
+  let contextHygieneReminderPayload: ReplyPayload | undefined;
 
   try {
     await typingSignals.signalRunStart();
@@ -1124,6 +1130,57 @@ export async function runReplyAgent(params: {
       isHeartbeat,
       replyOperation,
     });
+
+    if (!isHeartbeat && sessionKey) {
+      const entryForHygiene =
+        activeSessionEntry ?? (activeSessionStore ? activeSessionStore[sessionKey] : undefined);
+      if (entryForHygiene?.sessionId) {
+        const contextWindowTokens =
+          resolveContextTokensForModel({
+            cfg,
+            provider: followupRun.run.provider,
+            model: followupRun.run.model ?? defaultModel,
+            contextTokensOverride: agentCfgContextTokens,
+            fallbackContextTokens: entryForHygiene.contextTokens ?? DEFAULT_CONTEXT_TOKENS,
+            allowAsyncLoad: false,
+          }) ?? DEFAULT_CONTEXT_TOKENS;
+        const messages = readSessionMessages(
+          entryForHygiene.sessionId,
+          storePath,
+          entryForHygiene.sessionFile ?? followupRun.run.sessionFile,
+        ) as AgentMessage[];
+        const hygiene = evaluateContextHygieneReminder({
+          cfg,
+          messages,
+          prompt: followupRun.prompt,
+          sessionEntry: entryForHygiene,
+          contextWindowTokens,
+          preflightCompactionApplied,
+        });
+        if (hygiene.shouldWarn && hygiene.reminderText) {
+          contextHygieneReminderPayload = { text: hygiene.reminderText };
+          const nextEntry = {
+            ...entryForHygiene,
+            updatedAt: Date.now(),
+            contextHygieneLastWarnTurn: hygiene.turnCount,
+          };
+          activeSessionEntry = nextEntry;
+          if (activeSessionStore) {
+            activeSessionStore[sessionKey] = nextEntry;
+          }
+          if (storePath) {
+            await updateSessionStoreEntry({
+              storePath,
+              sessionKey,
+              update: async () => ({
+                updatedAt: nextEntry.updatedAt,
+                contextHygieneLastWarnTurn: hygiene.turnCount,
+              }),
+            }).catch(() => undefined);
+          }
+        }
+      }
+    }
 
     runFollowupTurn = createFollowupRunner({
       opts,
@@ -1708,6 +1765,9 @@ export async function runReplyAgent(params: {
     }
     if (prefixPayloads.length > 0) {
       finalPayloads = [...prefixPayloads, ...finalPayloads];
+    }
+    if (contextHygieneReminderPayload) {
+      finalPayloads = [...finalPayloads, contextHygieneReminderPayload];
     }
     if (trailingPluginStatusPayload) {
       finalPayloads = [...finalPayloads, trailingPluginStatusPayload];

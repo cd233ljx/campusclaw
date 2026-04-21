@@ -50,6 +50,26 @@ export type AgentContextPruningConfig = {
   };
 };
 
+export type AgentContextHygieneConfig = {
+  /** Enable low-interruption long-session hygiene reminders. Default: true. */
+  enabled?: boolean;
+  /** Context utilization ratio where reminders become eligible. Default: 0.8. */
+  warnThresholdRatio?: number;
+  /** Number of user turns to suppress repeat reminders after one is shown. Default: 12. */
+  cooldownTurns?: number;
+  /** Minimum user turns before any reminder can be shown. Default: 16. */
+  minTurnsBeforeWarn?: number;
+  /** Only remind when the latest prompt appears to shift away from the active topic. Default: true. */
+  onlyWhenTopicShift?: boolean;
+  /** Suppress reminders on turns where internal compaction already ran. Default: true. */
+  preferInternalSummarization?: boolean;
+  /**
+   * Demo mode disables reminders so competition demos emphasize uninterrupted
+   * continuity while keeping the feature configurable for production use.
+   */
+  demoMode?: boolean;
+};
+
 export type AgentStartupContextConfig = {
   /** Enable runtime-owned startup-context prelude on bare session resets (default: true). */
   enabled?: boolean;
@@ -250,6 +270,8 @@ export type AgentDefaultsConfig = {
   cliBackends?: Record<string, CliBackendConfig>;
   /** Opt-in: prune old tool results from the LLM context to reduce token usage. */
   contextPruning?: AgentContextPruningConfig;
+  /** Low-interruption reminders for very long sessions when the user appears to start a new topic. */
+  contextHygiene?: AgentContextHygieneConfig;
   /** LLM timeout configuration. */
   llm?: AgentLlmConfig;
   /** Compaction tuning and pre-compaction memory flush behavior. */

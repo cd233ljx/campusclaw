@@ -228,6 +228,8 @@ export type SessionEntry = {
   fallbackNoticeReason?: string;
   contextTokens?: number;
   compactionCount?: number;
+  /** User-turn index when the long-session hygiene reminder was last shown. */
+  contextHygieneLastWarnTurn?: number;
   compactionCheckpoints?: SessionCompactionCheckpoint[];
   memoryFlushAt?: number;
   memoryFlushCompactionCount?: number;
